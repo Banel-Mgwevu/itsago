@@ -70,3 +70,6 @@ linux/build/
 
 # Firebase & others
 .firebase/
+
+# Firebase config file (contains secrets)
+lib/firebase_options.dart
