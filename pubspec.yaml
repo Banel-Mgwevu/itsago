@@ -1,0 +1,49 @@
+name: interviewai
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.10.5+5
+  speech_to_text: ^6.6.0
+  flutter_tts: ^3.8.5
+  http: ^1.1.0
+  permission_handler: ^11.0.1
+  cupertino_icons: ^1.0.8
+  firebase_core: ^2.24.2
+  firebase_auth: ^4.15.3
+  google_sign_in: ^6.1.6
+  in_app_purchase: ^3.2.3
+  in_app_purchase_android: ^0.4.0+2
+  in_app_purchase_storekit: ^0.4.2
+  firebase_messaging: ^14.9.4
+  shared_preferences: ^2.5.3
+  flutter_local_notifications: ^19.3.0
+  timezone: ^0.10.1
+  google_mlkit_face_detection: ^0.13.1
+  purchases_flutter: ^8.10.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/logo.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo.png
