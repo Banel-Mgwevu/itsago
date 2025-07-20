@@ -1,16 +1,47 @@
-# interviewai
+# 🚀 ITSAGO – AI Interview Prep App
 
-A new Flutter project.
+**ITSAGO** is an AI-powered interview preparation app built with Flutter, Gemini AI, and Google ML Kit. It simulates real interviews, analyzes user performance in real-time, and provides smart feedback based on facial expressions, posture, voice tone, and answer relevance.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 📱 Features
 
-A few resources to get you started if this is your first Flutter project:
+- 🎤 AI-generated interview questions based on job descriptions
+- 📹 Video/audio interview simulation with real-time analysis
+- 🧠 Feedback on tone, confidence, and posture using ML Kit
+- 🔥 Firebase integration for auth, data storage, and cloud functions
+- 🌍 Built for mobile to support accessibility across Africa
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🛠️ Tech Stack
+
+| Technology     | Purpose                                   |
+|----------------|-------------------------------------------|
+| **Flutter**    | Cross-platform mobile app development     |
+| **Firebase**   | Authentication, Firestore, Cloud Functions|
+| **Gemini AI**  | AI question generation (LLM)              |
+| **ML Kit**     | Face detection, pose estimation, tracking |
+| **TTS/STT**    | Text-to-speech, Speech-to-text processing |
+
+---
+
+## 📦 Requirements
+
+Before running the app, ensure you have the following installed:
+
+- Flutter SDK: [Install here](https://docs.flutter.dev/get-started/install)
+- Android Studio or VS Code with Flutter extension
+- Firebase project with Android/iOS app connected
+- Gemini API Key (Google AI Studio)
+
+---
+
+## 🧪 Setup & Run Instructions, the flutter run
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/banel-mgwevu/itsago.git
+cd itsago
+flutter run
