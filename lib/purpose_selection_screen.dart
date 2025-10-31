@@ -6,7 +6,7 @@ import 'auth_screen.dart';
 class PurposeSelectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   
-  const PurposeSelectionScreen({Key? key, required this.cameras}) : super(key: key);
+  const PurposeSelectionScreen({super.key, required this.cameras});
 
   @override
   State<PurposeSelectionScreen> createState() => _PurposeSelectionScreenState();
@@ -203,7 +203,7 @@ class _PurposeSelectionScreenState extends State<PurposeSelectionScreen>
                       const SizedBox(height: 30),
                       
                       Text(
-                        'Why do you want to use ITAGO?',
+                        'Why do you want to use ITSAGO?',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w900,

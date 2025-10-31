@@ -29,9 +29,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <meta-data
+    android:name="com.google.android.gms.version"
+    android:value="@integer/google_play_services_version" />
+
     
     <application
-        android:label="Itsago AI"
+        android:label="ITSAGO AI"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

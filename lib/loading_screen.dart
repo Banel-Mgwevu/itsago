@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
@@ -14,12 +15,12 @@ class LoadingScreen extends StatefulWidget {
   final String apiKey;
 
   const LoadingScreen({
-    Key? key,
+    super.key,
     required this.cameras,
     required this.jobDescription,
     required this.company,
     required this.apiKey,
-  }) : super(key: key);
+  });
 
   @override
   State<LoadingScreen> createState() => _LoadingScreenState();
@@ -160,7 +161,7 @@ class _LoadingScreenState extends State<LoadingScreen>
               {
                 'parts': [
                   {
-                    'text': '''Create 8 interview questions for $company. Job: ${jobDesc.length > 500 ? jobDesc.substring(0, 500) + "..." : jobDesc}
+                    'text': '''Create 8 interview questions for $company. Job: ${jobDesc.length > 500 ? "${jobDesc.substring(0, 500)}..." : jobDesc}
 
 Return 8 numbered questions covering technical skills, behavioral scenarios, company fit, and problem-solving. Each question should be on a separate line starting with a number.''',
                   }
@@ -220,12 +221,16 @@ Return 8 numbered questions covering technical skills, behavioral scenarios, com
             }
             
             if (questions.isNotEmpty) {
-              print('Successfully generated ${questions.length} questions via Gemini API');
+              if (kDebugMode) {
+                print('Successfully generated ${questions.length} questions via Gemini API');
+              }
               return questions.take(8).toList();
             }
           }
         } else if (response.statusCode == 429) {
-          print('Quota exceeded (429). Waiting before retry...');
+          if (kDebugMode) {
+            print('Quota exceeded (429). Waiting before retry...');
+          }
           if (attempt < 3) {
             await Future.delayed(Duration(seconds: attempt * 2));
             continue;
@@ -246,12 +251,16 @@ Return 8 numbered questions covering technical skills, behavioral scenarios, com
           throw Exception('Gemini API error: ${response.statusCode} - ${response.body}');
         }
       } on TimeoutException {
-        print('Request timeout on attempt $attempt');
+        if (kDebugMode) {
+          print('Request timeout on attempt $attempt');
+        }
         if (attempt == 3) {
           throw Exception('Request timeout. Please check your internet connection.');
         }
       } catch (e) {
-        print('Gemini API attempt $attempt failed: $e');
+        if (kDebugMode) {
+          print('Gemini API attempt $attempt failed: $e');
+        }
         if (attempt == 3) {
           rethrow;
         }
@@ -259,7 +268,9 @@ Return 8 numbered questions covering technical skills, behavioral scenarios, com
       }
     }
 
-    print('Gemini API failed, using fallback questions...');
+    if (kDebugMode) {
+      print('Gemini API failed, using fallback questions...');
+    }
     return _getFallbackQuestions(company);
   }
 
@@ -312,7 +323,7 @@ Return 8 numbered questions covering technical skills, behavioral scenarios, com
                 child: Column(
                   children: [
                     Text(
-                      errorMessage + '\n\nCONTINUE WITH DEFAULTS?',
+                      '$errorMessage\n\nCONTINUE WITH DEFAULTS?',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,

@@ -5,7 +5,7 @@ import 'main.dart';
 class TermsScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   
-  const TermsScreen({Key? key, required this.cameras}) : super(key: key);
+  const TermsScreen({super.key, required this.cameras});
 
   @override
   State<TermsScreen> createState() => _TermsScreenState();
@@ -202,62 +202,128 @@ class _TermsScreenState extends State<TermsScreen>
                           children: [
                             _buildSection(
                               'ACCEPTANCE OF TERMS',
-                              'By accessing and using ITAGO (the "Service"), you accept and agree to be bound by the terms and provision of this agreement.',
+                              'By accessing and using ITSAGO (the "Service"), you accept and agree to be bound by the terms and provision of this agreement. If you do not agree to these terms, please do not use our service.',
                               BauhausColors.red,
                             ),
                             
                             _buildSection(
                               'SERVICE DESCRIPTION',
-                              'ITSAGO is an AI-powered interview coaching application that provides personalized practice sessions, feedback on communication skills, body language analysis, and interview preparation tools.',
+                              'ITSAGO is an AI-powered interview coaching application that provides personalized practice sessions, calendar-integrated coaching, push notifications, feedback on communication skills, body language analysis, and comprehensive interview preparation tools powered by advanced artificial intelligence.',
                               BauhausColors.blue,
                             ),
-                            
+
                             _buildSection(
-                              'USER DATA & PRIVACY',
-                              'We collect and process your data to provide personalized coaching experiences. Your interview sessions may be recorded for analysis purposes. We are committed to protecting your privacy and will not share your personal information with third parties without your consent.',
+                              'CALENDAR INTEGRATION & DATA',
+                              'Our calendar integration feature accesses your Google Calendar to provide personalized coaching based on upcoming interviews. We only read calendar events that contain interview-related keywords. Calendar data is processed locally on your device and used solely to enhance your coaching experience. You can revoke calendar access at any time.',
                               BauhausColors.yellow,
+                            ),
+
+                            _buildSection(
+                              'PUSH NOTIFICATIONS & CONSENT',
+                              'We send push notifications to remind you of upcoming interviews, provide daily motivation, and deliver coaching tips. You control notification preferences and can disable them at any time. Notifications may include interview reminders based on your calendar events and general coaching content to improve your skills.',
+                              BauhausColors.black,
                             ),
                             
                             _buildSection(
-                              'AI ANALYSIS',
-                              'Our AI technology analyzes your speech patterns, facial expressions, and body language to provide feedback. This analysis is performed automatically and results are used solely for improving your interview skills.',
+                              'USER DATA & PRIVACY PROTECTION',
+                              'We collect and process your data to provide personalized coaching experiences. Your interview sessions may be recorded for AI analysis purposes. We implement industry-standard security measures to protect your data. We are committed to protecting your privacy and will never sell your personal information to third parties. Your data rights under GDPR, CCPA, and other privacy laws are fully respected.',
+                              BauhausColors.red,
+                            ),
+                            
+                            _buildSection(
+                              'ARTIFICIAL INTELLIGENCE & MACHINE LEARNING',
+                              'Our advanced AI technology analyzes your speech patterns, facial expressions, body language, and interview responses to provide personalized feedback. All AI processing is designed to improve your interview skills. The AI learns from aggregated, anonymized data to enhance coaching quality while maintaining your privacy. Individual sessions remain private to you.',
+                              BauhausColors.blue,
+                            ),
+
+                            _buildSection(
+                              'GOOGLE SERVICES INTEGRATION',
+                              'Our app integrates with Google services including Google Calendar and Google Sign-In. Your use of these features is also governed by Google\'s Privacy Policy and Terms of Service. We only access the minimum necessary data to provide our coaching services. You can disconnect Google services at any time through your device settings.',
+                              BauhausColors.yellow,
+                            ),
+
+                            _buildSection(
+                              'DATA RETENTION & DELETION',
+                              'We retain your data only as long as necessary to provide our services or as required by law. You can request deletion of your account and associated data at any time. Upon deletion request, we will remove your personal data within 30 days, except where retention is required for legal compliance or legitimate business purposes.',
                               BauhausColors.black,
                             ),
                             
                             _buildSection(
                               'USER RESPONSIBILITIES',
-                              'You are responsible for providing accurate information and using the service in a lawful manner. You must not attempt to reverse engineer, modify, or distribute any part of our AI technology.',
+                              'You are responsible for providing accurate information and using the service in a lawful manner. You must not attempt to reverse engineer, modify, or distribute any part of our AI technology. You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account.',
                               BauhausColors.red,
+                            ),
+
+                            _buildSection(
+                              'COACHING DISCLAIMER',
+                              'ITSAGO provides AI-powered coaching suggestions and feedback for educational and skill development purposes. Our service is designed to help improve interview skills but cannot guarantee specific interview outcomes or job offers. Results may vary based on individual effort, market conditions, and other factors beyond our control.',
+                              BauhausColors.blue,
                             ),
                             
                             _buildSection(
                               'LIMITATION OF LIABILITY',
-                              'ITSAGO provides coaching suggestions and feedback for educational purposes. We cannot guarantee specific interview outcomes. The service is provided "as is" without warranties of any kind.',
-                              BauhausColors.blue,
-                            ),
-                            
-                            _buildSection(
-                              'SUBSCRIPTION & PAYMENTS',
-                              'Certain features may require a subscription. Payment terms and cancellation policies will be clearly stated at the time of purchase. Refunds are subject to our refund policy.',
+                              'The service is provided "as is" without warranties of any kind, either express or implied. We shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of the service. Our total liability shall not exceed the amount paid by you for the service in the twelve months preceding the claim.',
                               BauhausColors.yellow,
                             ),
                             
                             _buildSection(
-                              'INTELLECTUAL PROPERTY',
-                              'All content, features, and functionality of ITAGO are owned by us and are protected by copyright, trademark, and other intellectual property laws.',
+                              'SUBSCRIPTION & PAYMENTS',
+                              'Certain premium features require a subscription. Payment terms, pricing, and cancellation policies are clearly stated at the time of purchase. Subscriptions automatically renew unless cancelled. You may cancel your subscription at any time through your device\'s app store. Refunds are subject to our refund policy and applicable app store policies.',
                               BauhausColors.black,
                             ),
-                            
+
                             _buildSection(
-                              'TERMINATION',
-                              'We reserve the right to terminate or suspend your access to the service at any time for violation of these terms or for any other reason deemed necessary.',
+                              'FREE TIER & PREMIUM FEATURES',
+                              'We offer both free and premium features. Free tier users have access to basic interview coaching. Premium features include advanced AI analysis, unlimited practice sessions, detailed performance analytics, and priority customer support. Feature availability may change with notice.',
                               BauhausColors.red,
                             ),
                             
                             _buildSection(
-                              'CHANGES TO TERMS',
-                              'We reserve the right to modify these terms at any time. Continued use of the service after changes constitutes acceptance of the new terms.',
+                              'INTELLECTUAL PROPERTY',
+                              'All content, features, AI models, and functionality of ITSAGO are owned by us and are protected by international copyright, trademark, and other intellectual property laws. You may not copy, modify, distribute, sell, or lease any part of our services or included software.',
                               BauhausColors.blue,
+                            ),
+
+                            _buildSection(
+                              'THIRD-PARTY SERVICES',
+                              'Our app may integrate with third-party services and platforms. We are not responsible for the privacy practices or content of these third-party services. Your use of third-party services is subject to their respective terms and privacy policies.',
+                              BauhausColors.yellow,
+                            ),
+
+                            _buildSection(
+                              'PROHIBITED USES',
+                              'You may not use our service for any unlawful purposes, to violate any laws, to transmit harmful or malicious content, to attempt unauthorized access to our systems, or to interfere with other users\' experience. We reserve the right to investigate and take appropriate action against violations.',
+                              BauhausColors.black,
+                            ),
+                            
+                            _buildSection(
+                              'TERMINATION & SUSPENSION',
+                              'We reserve the right to terminate or suspend your access to the service at any time for violation of these terms, suspected fraudulent activity, or for any other reason deemed necessary for the protection of our service and users. Upon termination, your right to use the service ceases immediately.',
+                              BauhausColors.red,
+                            ),
+
+                            _buildSection(
+                              'UPDATES & MODIFICATIONS',
+                              'We regularly update our service to improve functionality and add new features. Some updates may require acceptance of new terms. We will notify you of significant changes to these terms through the app or via email. Continued use after notification constitutes acceptance.',
+                              BauhausColors.blue,
+                            ),
+                            
+                            _buildSection(
+                              'CHANGES TO TERMS',
+                              'We reserve the right to modify these terms at any time. We will provide notice of material changes through the app, email, or other communication methods. Your continued use of the service after changes become effective constitutes acceptance of the new terms.',
+                              BauhausColors.yellow,
+                            ),
+
+                            _buildSection(
+                              'GOVERNING LAW & DISPUTE RESOLUTION',
+                              'These terms shall be governed by and construed in accordance with applicable laws. Any disputes arising under these terms shall be resolved through binding arbitration where permitted by law. You retain the right to bring claims in small claims court for qualifying disputes.',
+                              BauhausColors.black,
+                            ),
+
+                            _buildSection(
+                              'ACCESSIBILITY & SUPPORT',
+                              'We strive to make our service accessible to users with disabilities. If you encounter accessibility barriers, please contact our support team. We provide customer support through multiple channels and aim to respond to inquiries within 48 hours.',
+                              BauhausColors.red,
                             ),
                             
                             const SizedBox(height: 30),
@@ -291,7 +357,7 @@ class _TermsScreenState extends State<TermsScreen>
                                         ),
                                         const SizedBox(width: 15),
                                         Text(
-                                          'CONTACT US',
+                                          'CONTACT & SUPPORT',
                                           style: TextStyle(
                                             fontSize: 18,
                                             fontWeight: FontWeight.w900,
@@ -303,7 +369,7 @@ class _TermsScreenState extends State<TermsScreen>
                                     ),
                                     const SizedBox(height: 15),
                                     Text(
-                                      'For questions about these terms or our service, contact us at:',
+                                      'For questions about these terms, privacy concerns, data requests, or technical support:',
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
@@ -311,13 +377,51 @@ class _TermsScreenState extends State<TermsScreen>
                                       ),
                                     ),
                                     const SizedBox(height: 10),
-                                    Text(
-                                      'support@itago.ai\nwww.itago.ai/terms',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w900,
-                                        color: BauhausColors.blue,
-                                        letterSpacing: 1,
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: BauhausColors.lightGray,
+                                        border: Border.all(color: BauhausColors.gray, width: 1),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '📧 Email: support@itsago.ai',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              color: BauhausColors.blue,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            '🌐 Website: www.itsago.ai',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              color: BauhausColors.blue,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            '📄 Privacy Policy: www.itsago.ai/privacy',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              color: BauhausColors.blue,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            '⚖️ Terms: www.itsago.ai/terms',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              color: BauhausColors.blue,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ],
@@ -326,17 +430,61 @@ class _TermsScreenState extends State<TermsScreen>
                             ),
                             
                             const SizedBox(height: 30),
+
+                            // Compliance notice
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(15),
+                              decoration: BoxDecoration(
+                                color: BauhausColors.yellow,
+                                border: Border.all(color: BauhausColors.black, width: 2),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.verified_user,
+                                    color: BauhausColors.black,
+                                    size: 24,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'COMPLIANCE & PRIVACY',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w900,
+                                      color: BauhausColors.black,
+                                      letterSpacing: 1,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    'GDPR Compliant • CCPA Compliant • SOC 2 Type II',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: BauhausColors.black,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            
+                            const SizedBox(height: 20),
                             
                             // Last updated
-                            Text(
-                              'LAST UPDATED: JANUARY 2025',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: BauhausColors.gray,
-                                letterSpacing: 1,
+                            Center(
+                              child: Text(
+                                'LAST UPDATED: JANUARY 2025 • VERSION 2.0',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: BauhausColors.gray,
+                                  letterSpacing: 1,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
                             
                             const SizedBox(height: 40),

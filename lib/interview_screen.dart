@@ -11,12 +11,12 @@ class InterviewScreen extends StatefulWidget {
   final String apiKey;
 
   const InterviewScreen({
-    Key? key,
+    super.key,
     required this.cameras,
     required this.questions,
     required this.company,
     required this.apiKey,
-  }) : super(key: key);
+  });
 
   @override
   State<InterviewScreen> createState() => _InterviewScreenState();
@@ -49,6 +49,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
   int _preRecordingCountdown = 3;
   bool _preRecordingCountdownFinished = false;
   
+  bool _showingSpeakPrompt = false;
+  
   double _confidenceScore = 70.0;
   String _emotion = 'Neutral';
   List<String> _fillerWords = [];
@@ -57,6 +59,9 @@ class _InterviewScreenState extends State<InterviewScreen> {
   
   double _analysisCardsOpacity = 1.0;
   bool _isSpeaking = false;
+  
+  bool _faceDetected = false;
+  bool _showingFaceWarning = false;
 
   @override
   void initState() {
@@ -415,6 +420,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
         _showingPreRecordingCountdown = state['showingPreRecordingCountdown'] ?? _showingPreRecordingCountdown;
         _preRecordingCountdown = state['preRecordingCountdown'] ?? _preRecordingCountdown;
         _preRecordingCountdownFinished = state['preRecordingCountdownFinished'] ?? _preRecordingCountdownFinished;
+        _showingSpeakPrompt = state['showingSpeakPrompt'] ?? _showingSpeakPrompt;
         _confidenceScore = state['confidenceScore'] ?? _confidenceScore;
         _emotion = state['emotion'] ?? _emotion;
         _fillerWords = state['fillerWords'] ?? _fillerWords;
@@ -422,6 +428,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
         _sentiment = state['sentiment'] ?? _sentiment;
         _analysisCardsOpacity = state['analysisCardsOpacity'] ?? _analysisCardsOpacity;
         _isSpeaking = state['isSpeaking'] ?? _isSpeaking;
+        _faceDetected = state['faceDetected'] ?? _faceDetected;
+        _showingFaceWarning = state['showingFaceWarning'] ?? _showingFaceWarning;
       });
     }
   }
@@ -787,6 +795,55 @@ class _InterviewScreenState extends State<InterviewScreen> {
             child: _manager.getCameraPreview(),
           ),
           
+          // Face warning overlay
+          if (_showingFaceWarning)
+            Positioned.fill(
+              child: Container(
+                color: BauhausColors.red.withOpacity(0.3),
+                child: Center(
+                  child: Container(
+                    margin: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: BauhausColors.black.withOpacity(0.9),
+                      border: Border.all(color: BauhausColors.red, width: 3),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.face,
+                          color: BauhausColors.red,
+                          size: 48,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'FACE NOT DETECTED',
+                          style: TextStyle(
+                            color: BauhausColors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Please position yourself in front of the camera',
+                          style: TextStyle(
+                            color: BauhausColors.yellow,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          
           // Question header
           Positioned(
             top: 0,
@@ -900,187 +957,43 @@ class _InterviewScreenState extends State<InterviewScreen> {
             ),
           ),
           
-          // Bottom controls with Bauhaus styling
-          Positioned(
-            bottom: 28,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: BauhausColors.black.withOpacity(0.8),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_isRecording) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: BauhausColors.red, width: 3),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                width: 16,
-                                height: 16,
-                                decoration: BoxDecoration(
-                                  color: _speechStatus == 'listening' ? BauhausColors.red : BauhausColors.yellow,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                _getSpeechStatusText().toUpperCase(),
-                                style: TextStyle(
-                                  color: BauhausColors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            _currentTranscript.isEmpty 
-                                ? 'INTERVIEW IN PROGRESS... ${_formatDuration(_recordingDuration)} | SHARE YOUR THOUGHTS!' 
-                                : 'GREAT RESPONSE! ${_formatDuration(_recordingDuration)} | WORDS: ${_currentTranscript.split(' ').where((w) => w.isNotEmpty).length}',
-                            style: TextStyle(
-                              color: _currentTranscript.isEmpty ? BauhausColors.yellow : BauhausColors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 1,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          if (_currentTranscript.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              color: BauhausColors.white.withOpacity(0.1),
-                              child: Text(
-                                _currentTranscript,
-                                style: TextStyle(
-                                  color: BauhausColors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ],
-                        ],
+          // Speak prompt overlay
+          if (_showingSpeakPrompt && _isRecording)
+            Positioned(
+              top: MediaQuery.of(context).size.height * 0.5 - 50,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: BauhausColors.blue.withOpacity(0.9),
+                  border: Border.all(color: BauhausColors.white, width: 2),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.mic,
+                      color: BauhausColors.white,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'START SPEAKING NOW',
+                      style: TextStyle(
+                        color: BauhausColors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2,
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    Container(
-                      width: double.infinity,
-                      height: 60,
-                      color: BauhausColors.red,
-                      child: MaterialButton(
-                        onPressed: () => _manager.stopRecording(),
-                        child: Text(
-                          'COMPLETE ANSWER',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: BauhausColors.white,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ] else ...[
-                    // Show TTS status when not recording AND TTS hasn't completed
-                    if (!_ttsCompleted && !_recordingCanStart) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: BauhausColors.blue, width: 3),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: BoxDecoration(
-                                    color: BauhausColors.blue,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  'INTERVIEWER ASKING QUESTION...',
-                                  style: TextStyle(
-                                    color: BauhausColors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 2,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'PLEASE LISTEN - YOUR TURN TO RESPOND NEXT',
-                              style: TextStyle(
-                                color: BauhausColors.blue,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 1,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    
-                    // Only show skip button AFTER TTS has completed
-                    if (_ttsCompleted || _recordingCanStart) ...[
-                      Row(
-                        children: [
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Container(
-                              height: 50,
-                              color: BauhausColors.gray,
-                              child: MaterialButton(
-                                onPressed: () => _manager.skipQuestion(),
-                                child: Text(
-                                  'SKIP',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w900,
-                                    color: BauhausColors.white,
-                                    letterSpacing: 1,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
           
-          // Pre-recording countdown display (3, 2, 1)
-          if (_showingPreRecordingCountdown)
+          // FIXED: Pre-recording countdown display (ONLY shows when TTS completes and not recording)
+          if (_showingPreRecordingCountdown && !_isRecording && _ttsCompleted)
             Positioned(
               left: 20,
               top: MediaQuery.of(context).size.height * 0.35,
@@ -1161,7 +1074,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              _preRecordingCountdown == 1 ? 'SEC' : 'SECS',
+                              _preRecordingCountdown == 1 ? 'SEC' : 'SEC',
                               style: TextStyle(
                                 color: BauhausColors.blue.withOpacity(0.8),
                                 fontSize: 9,
@@ -1179,8 +1092,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
               ),
             ),
           
-          // Final countdown display
-          if (_showingFinalCountdown)
+          // FIXED: Final countdown display (ONLY shows during recording at 27+ seconds)
+          if (_showingFinalCountdown && _isRecording && _recordingDuration >= 27)
             Positioned(
               left: 20,
               top: MediaQuery.of(context).size.height * 0.35,
@@ -1261,7 +1174,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              _finalCountdown == 1 ? 'SEC' : 'SECS',
+                              _finalCountdown == 1 ? 'SEC' : 'SEC',
                               style: TextStyle(
                                 color: BauhausColors.red.withOpacity(0.8),
                                 fontSize: 9,
@@ -1278,6 +1191,121 @@ class _InterviewScreenState extends State<InterviewScreen> {
                 ),
               ),
             ),
+          
+          // Bottom controls with Bauhaus styling - REMOVED RECORDING STATUS SECTION
+          Positioned(
+            bottom: 28,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: BauhausColors.black.withOpacity(0.8),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_isRecording) ...[
+                    // Simple complete button when recording - no status section
+                    Container(
+                      width: double.infinity,
+                      height: 60,
+                      color: BauhausColors.red,
+                      child: MaterialButton(
+                        onPressed: () => _manager.stopRecording(),
+                        child: Text(
+                          'COMPLETE ANSWER',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: BauhausColors.white,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ] else ...[
+                    // Show TTS status when not recording AND TTS hasn't completed
+                    if (!_ttsCompleted && !_recordingCanStart) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: BauhausColors.blue, width: 3),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: 16,
+                                  height: 16,
+                                  decoration: BoxDecoration(
+                                    color: BauhausColors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'INTERVIEWER ASKING QUESTION',
+                                  style: TextStyle(
+                                    color: BauhausColors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'PLEASE LISTEN - YOUR TURN TO RESPOND NEXT',
+                              style: TextStyle(
+                                color: BauhausColors.blue,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    
+                    // Only show skip button AFTER TTS has completed
+                    if (_ttsCompleted || _recordingCanStart) ...[
+                      Row(
+                        children: [
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Container(
+                              height: 50,
+                              color: BauhausColors.gray,
+                              child: MaterialButton(
+                                onPressed: () => _manager.skipQuestion(),
+                                child: Text(
+                                  'SKIP',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    color: BauhausColors.white,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1342,7 +1370,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
   String _getSpeechStatusText() {
     switch (_speechStatus) {
       case 'listening':
-        return _currentTranscript.isEmpty ? 'LISTENING FOR YOUR ANSWER' : 'CAPTURING YOUR RESPONSE';
+        return _currentTranscript.isEmpty ? 'LISTENING' : 'CAPTURING YOUR RESPONSE';
       case 'notListening':
         return 'READY TO LISTEN';
       case 'unavailable':

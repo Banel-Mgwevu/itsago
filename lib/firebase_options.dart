@@ -52,7 +52,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBMbLNm2lOelk6zQmdYwIp5mKoMCTx12DA',
-    appId: '1:415467037952:android:36afb672889557c32f7fe5',
+    appId: '1:415467037952:android:1f62192ef612f3312f7fe5',
     messagingSenderId: '415467037952',
     projectId: 'itsago-2654e',
     storageBucket: 'itsago-2654e.firebasestorage.app',
@@ -60,11 +60,13 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyAB9YqVd49W6gLajmYotdYPhVd0nSP3N40',
-    appId: '1:415467037952:ios:5b46c6d0578d54172f7fe5',
+    appId: '1:415467037952:ios:84208b463d42a91f2f7fe5',
     messagingSenderId: '415467037952',
     projectId: 'itsago-2654e',
     storageBucket: 'itsago-2654e.firebasestorage.app',
-    iosBundleId: 'com.example.interviewai',
+    androidClientId: '415467037952-5ubv4i5c3l4vq4t7drb5k2f31mfbg728.apps.googleusercontent.com',
+    iosClientId: '415467037952-kl348b383pptjfklmoslheccguov717s.apps.googleusercontent.com',
+    iosBundleId: 'com.itsago.interviewai',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -73,6 +75,8 @@ class DefaultFirebaseOptions {
     messagingSenderId: '415467037952',
     projectId: 'itsago-2654e',
     storageBucket: 'itsago-2654e.firebasestorage.app',
+    androidClientId: '415467037952-5ubv4i5c3l4vq4t7drb5k2f31mfbg728.apps.googleusercontent.com',
+    iosClientId: '415467037952-lmb2t04bl7bco16e3ad3vf1p2js6jgha.apps.googleusercontent.com',
     iosBundleId: 'com.example.interviewai',
   );
 
@@ -85,4 +89,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'itsago-2654e.firebasestorage.app',
     measurementId: 'G-0XCQ4QFTPC',
   );
+
 }

@@ -7,12 +7,33 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:415467037952:android:36afb672889557c32f7fe5",
+        "mobilesdk_app_id": "1:415467037952:android:1f62192ef612f3312f7fe5",
         "android_client_info": {
-          "package_name": "com.example.interviewai"
+          "package_name": "com.itsago.interviewai"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "415467037952-99u2ovs6haqn25bfv79cuq1ua2r4hdjp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.itsago.interviewai",
+            "certificate_hash": "cfd90eeea4ee24508049b0eb0fb347fe5110b5d8"
+          }
+        },
+        {
+          "client_id": "415467037952-jfpffdnjd8dnikst9q2adipnt7ceekd4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.itsago.interviewai",
+            "certificate_hash": "fee8c4af7f01ad208e99e9ccaad315f478f969bd"
+          }
+        },
+        {
+          "client_id": "415467037952-b3s8ajdnrmrsrrh59s8namncvt8e3cqg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBMbLNm2lOelk6zQmdYwIp5mKoMCTx12DA"
@@ -20,7 +41,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "415467037952-b3s8ajdnrmrsrrh59s8namncvt8e3cqg.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "415467037952-kl348b383pptjfklmoslheccguov717s.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.itsago.interviewai"
+              }
+            }
+          ]
         }
       }
     }

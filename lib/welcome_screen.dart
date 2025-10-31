@@ -1,6 +1,5 @@
 import 'package:camera/camera.dart'; //AIzaSyBG9Ibtg3a0UTO5DZb4mfhmN7mtij_OMPU
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'main.dart';
 import 'purpose_selection_screen.dart';
 

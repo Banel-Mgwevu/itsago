@@ -2,7 +2,7 @@ name: interviewai
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.0+10
 
 environment:
   sdk: ^3.6.0
@@ -28,6 +28,16 @@ dependencies:
   timezone: ^0.10.1
   google_mlkit_face_detection: ^0.13.1
   purchases_flutter: ^8.10.6
+  path_provider: ^2.1.5
+  audioplayers: ^6.5.0
+  just_audio: ^0.9.44
+  firebase_vertexai: ^0.1.1
+  googleapis: ^11.4.0
+  googleapis_auth: ^1.4.1
+  pdf: ^3.11.3
+  share_plus: ^10.0.0
+  cloud_firestore: ^4.17.5
+  # play_integrity: ^0.1.5
 
 dev_dependencies:
   flutter_test:

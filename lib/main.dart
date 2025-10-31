@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:interviewai/main_menu_screen.dart';
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:purchases_flutter/purchases_flutter.dart';
 import 'firebase_options.dart';
 
-import 'setup_screen.dart';
 import 'splash_screen.dart';
 import 'notification_service.dart';
+import 'subscription_service.dart';
 
 // Bauhaus Color Palette
 class BauhausColors {
@@ -22,18 +22,14 @@ class BauhausColors {
   static const Color lightGray = Color(0xFFF5F5F5);
 }
 
-// RevenueCat Configuration
-class RevenueCatConfig {
-  // TODO: Replace these with your actual RevenueCat API keys
-  static const String androidApiKey = 'goog_YOUR_GOOGLE_PLAY_API_KEY_HERE';
-  static const String iosApiKey = 'appl_YOUR_APP_STORE_API_KEY_HERE';
+// Subscription Configuration
+class SubscriptionConfig {
+  // Updated product identifiers to match your Play Console setup
+  static const String monthlyProductId = 'itsago_prod'; // Your current subscription ID
+  static const String annualProductId = 'itsago_annual_prod'; // Create this in Play Console
   
-  // Entitlement identifier - should match your RevenueCat dashboard
-  static const String premiumEntitlementId = 'premium';
-  
-  // Product identifiers - should match your RevenueCat dashboard
-  static const String monthlyProductId = 'itago_monthly_premium';
-  static const String annualProductId = 'itago_annual_premium';
+  // For testing purposes
+  static const String testProductId = 'android.test.purchased';
 }
 
 void main() async {
@@ -51,8 +47,8 @@ void main() async {
     // Initialize notification service
     await NotificationService().initialize();
 
-    // Initialize RevenueCat
-    await _initializeRevenueCat();
+    // Initialize Subscription Service
+    await SubscriptionService().initialize();
 
     // Start with splash screen - authentication check happens there
     runApp(const ItagoApp());
@@ -62,78 +58,65 @@ void main() async {
   }
 }
 
-Future<void> _initializeRevenueCat() async {
-  try {
-    // Configure RevenueCat logging (only in debug mode)
-    if (kDebugMode) {
-      await Purchases.setLogLevel(LogLevel.debug);
-    } else {
-      await Purchases.setLogLevel(LogLevel.info);
-    }
-
-    // Configure RevenueCat based on platform
-    PurchasesConfiguration configuration;
-    
-    if (Platform.isAndroid) {
-      configuration = PurchasesConfiguration(RevenueCatConfig.androidApiKey);
-    } else if (Platform.isIOS) {
-      configuration = PurchasesConfiguration(RevenueCatConfig.iosApiKey);
-    } else {
-      throw UnsupportedError('RevenueCat not supported on this platform');
-    }
-
-    // Set user ID if you have one (optional)
-    // configuration = configuration.copyWith(userId: 'your_user_id');
-
-    // Initialize RevenueCat
-    await Purchases.configure(configuration);
-
-    // Set up listener for customer info updates
-    Purchases.addCustomerInfoUpdateListener((customerInfo) {
-      // Handle customer info updates (subscription changes, etc.)
-      final isPremium = customerInfo.entitlements.all[RevenueCatConfig.premiumEntitlementId]?.isActive ?? false;
-      
-      if (kDebugMode) {
-        print('Customer info updated. Premium status: $isPremium');
-      }
-      
-      // You can save premium status to shared preferences or state management here
-      _savePremiumStatus(isPremium);
-    });
-
-    if (kDebugMode) {
-      print('RevenueCat initialized successfully');
-    }
-  } catch (e) {
-    if (kDebugMode) {
-      print('Failed to initialize RevenueCat: $e');
-    }
-    // Don't throw error - app can still work without RevenueCat in emergency
-    // Just log the error and continue
-  }
-}
-
-void _savePremiumStatus(bool isPremium) {
-  // TODO: Implement saving premium status to your preferred storage
-  // This could be SharedPreferences, Hive, or your state management solution
-  // Example:
-  // SharedPreferences.getInstance().then((prefs) {
-  //   prefs.setBool('is_premium', isPremium);
-  // });
-}
-
 class ItagoApp extends StatefulWidget {
-  const ItagoApp({Key? key}) : super(key: key);
+  const ItagoApp({super.key});
 
   @override
   State<ItagoApp> createState() => _ItagoAppState();
 }
 
 class _ItagoAppState extends State<ItagoApp> with WidgetsBindingObserver {
+  late Stream<User?> _authStateChanges;
+  final SubscriptionService _subscriptionService = SubscriptionService();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // Listen to authentication state changes
+    _authStateChanges = FirebaseAuth.instance.authStateChanges();
+    _setupAuthListener();
+  }
+
+  void _setupAuthListener() {
+    _authStateChanges.listen((User? user) async {
+      if (kDebugMode) {
+        print('Auth state changed: ${user?.uid ?? 'No user'}');
+      }
+      
+      // Notify subscription service about auth changes
+      await _subscriptionService.onUserAuthChanged(user);
+      
+      if (user != null) {
+        // User signed in - sync subscription data
+        await _syncUserData(user);
+      } else {
+        // User signed out
+        if (kDebugMode) {
+          print('User signed out');
+        }
+      }
+    });
+  }
+
+  Future<void> _syncUserData(User user) async {
+    try {
+      if (kDebugMode) {
+        print('Syncing user data for: ${user.email}');
+      }
+      
+      // Sync subscription status
+      await _subscriptionService.syncSubscriptionStatus();
+      
+      // You can add other data syncing here
+      // e.g., user preferences, interview history, etc.
+      
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error syncing user data: $e');
+      }
+    }
   }
 
   @override
@@ -154,8 +137,8 @@ class _ItagoAppState extends State<ItagoApp> with WidgetsBindingObserver {
       case AppLifecycleState.resumed:
         // User returned to app - cancel comeback notification
         NotificationService().onAppResumed();
-        // Also sync RevenueCat data when app resumes
-        _syncRevenueCatData();
+        // Also sync subscription data when app resumes
+        _syncSubscriptionData();
         break;
       case AppLifecycleState.detached:
       case AppLifecycleState.inactive:
@@ -164,16 +147,13 @@ class _ItagoAppState extends State<ItagoApp> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _syncRevenueCatData() async {
+  Future<void> _syncSubscriptionData() async {
     try {
-      // Sync the latest customer info when app resumes
-      await Purchases.syncPurchases();
-      final customerInfo = await Purchases.getCustomerInfo();
-      final isPremium = customerInfo.entitlements.all[RevenueCatConfig.premiumEntitlementId]?.isActive ?? false;
-      _savePremiumStatus(isPremium);
+      // Check latest subscription status when app resumes
+      await _subscriptionService.checkSubscriptionStatus();
     } catch (e) {
       if (kDebugMode) {
-        print('Failed to sync RevenueCat data: $e');
+        print('Failed to sync subscription data: $e');
       }
     }
   }
@@ -315,34 +295,88 @@ class InterviewCoachApp extends StatelessWidget {
           ),
         ),
       ),
-      home: SetupScreen(cameras: cameras),
+      home: MainMenuScreen(cameras: cameras),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-// Utility class to check premium status throughout the app
-class PremiumStatus {
-  static Future<bool> isPremium() async {
+// Utility class for subscription-related UI helpers
+class SubscriptionUI {
+  // Show subscription status in debug mode
+  static Widget buildDebugSubscriptionInfo() {
+    if (!kDebugMode) return const SizedBox.shrink();
+    
+    return FutureBuilder<bool>(
+      future: PremiumStatus.isPremium(),
+      builder: (context, snapshot) {
+        return Container(
+          padding: const EdgeInsets.all(8),
+          color: snapshot.data == true ? Colors.green : Colors.red,
+          child: Text(
+            'Premium: ${snapshot.data ?? false}',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        );
+      },
+    );
+  }
+  
+  // Helper method to refresh subscription status across the app
+  static Future<void> refreshSubscriptionStatus(BuildContext context) async {
     try {
-      final customerInfo = await Purchases.getCustomerInfo();
-      return customerInfo.entitlements.all[RevenueCatConfig.premiumEntitlementId]?.isActive ?? false;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Failed to check premium status: $e');
+      await SubscriptionService().syncSubscriptionStatus();
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Subscription status refreshed',
+              style: TextStyle(
+                color: BauhausColors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            backgroundColor: BauhausColors.blue,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
-      return false;
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error refreshing subscription',
+              style: TextStyle(
+                color: BauhausColors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            backgroundColor: BauhausColors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
+}
 
-  static Future<CustomerInfo?> getCustomerInfo() async {
-    try {
-      return await Purchases.getCustomerInfo();
-    } catch (e) {
-      if (kDebugMode) {
-        print('Failed to get customer info: $e');
-      }
-      return null;
-    }
+// Extension to add subscription helpers to BuildContext
+extension SubscriptionHelpers on BuildContext {
+  // Check if user has premium access
+  Future<bool> checkPremiumAccess() async {
+    return await PremiumStatus.isPremium();
+  }
+  
+  // Show premium upgrade modal if user is not premium
+  Future<bool> requiresPremiumUpgrade() async {
+    final isPremium = await PremiumStatus.isPremium();
+    return !isPremium;
+  }
+  
+  // Get subscription info for display
+  Future<Map<String, dynamic>> getSubscriptionDisplayInfo() async {
+    return await SubscriptionService().getSubscriptionInfo();
   }
 }

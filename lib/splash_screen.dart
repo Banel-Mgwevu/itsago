@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:timezone/timezone.dart' as tz;
 import 'dart:async';
-import 'dart:math';
 import 'main.dart';
 import 'welcome_screen.dart';
 import 'notification_service.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({Key? key}) : super(key: key);
+  const SplashScreen({super.key});
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -162,8 +160,9 @@ class _SplashScreenState extends State<SplashScreen>
       final cameras = await availableCameras();
       
       if (mounted) {
-        // Check notification permissions first
-        await _handleNotificationPermissions();
+        // Request notification permissions
+        final notificationService = NotificationService();
+        await notificationService.checkAndRequestPermissions();
         
         // Check if user is already authenticated
         final user = FirebaseAuth.instance.currentUser;
@@ -207,30 +206,6 @@ class _SplashScreenState extends State<SplashScreen>
             transitionDuration: const Duration(milliseconds: 600),
           ),
         );
-      }
-    }
-  }
-
-  Future<void> _handleNotificationPermissions() async {
-    final notificationService = NotificationService();
-    final shouldRequest = await notificationService.checkAndRequestPermissions();
-    
-    if (!shouldRequest && mounted) {
-      // Show dialog to ask user if they want to enable notifications
-      final result = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return NotificationPermissionDialog(
-            onAccept: () => Navigator.of(context).pop(true),
-            onDecline: () => Navigator.of(context).pop(false),
-          );
-        },
-      );
-      
-      if (result == true) {
-        // User wants to enable, try requesting again
-        await notificationService.checkAndRequestPermissions();
       }
     }
   }

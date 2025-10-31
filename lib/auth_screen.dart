@@ -2,19 +2,21 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
 import 'terms_screen.dart';
-import 'setup_screen.dart';
+import 'main_menu_screen.dart';
+import 'onboarding_screen.dart'; // Import the onboarding screen
 
 class AuthScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   final String selectedPurpose;
   
   const AuthScreen({
-    Key? key, 
+    super.key, 
     required this.cameras,
     required this.selectedPurpose,
-  }) : super(key: key);
+  });
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -88,6 +90,64 @@ class _AuthScreenState extends State<AuthScreen>
     _animationController.dispose();
     _logoController.dispose();
     super.dispose();
+  }
+
+  // Check if user has seen onboarding before
+  Future<bool> _hasSeenOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('has_seen_onboarding') ?? false;
+  }
+
+  // Mark onboarding as seen
+  Future<void> _setOnboardingSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('has_seen_onboarding', true);
+  }
+
+  // Navigate to appropriate screen after sign in
+  Future<void> _navigateAfterSignIn() async {
+    if (mounted) {
+      final hasSeenOnboarding = await _hasSeenOnboarding();
+      
+      if (hasSeenOnboarding) {
+        // Returning user - go directly to main menu
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                MainMenuScreen(cameras: widget.cameras),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            transitionDuration: const Duration(milliseconds: 600),
+          ),
+        );
+      } else {
+        // First-time user - show onboarding
+        await _setOnboardingSeen();
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                OnboardingScreen(cameras: widget.cameras),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.0, 1.0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOut,
+                  )),
+                  child: child,
+                ),
+              );
+            },
+            transitionDuration: const Duration(milliseconds: 800),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -428,29 +488,31 @@ class _AuthScreenState extends State<AuthScreen>
                           const SizedBox(height: 40),
                           
                           // Skip option (for demo purposes)
-                          Container(
-                            width: double.infinity,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              color: BauhausColors.lightGray,
-                              border: Border.all(
-                                color: BauhausColors.gray,
-                                width: 2,
-                              ),
-                            ),
-                            child: MaterialButton(
-                              onPressed: _isLoading ? null : _skipToDemo,
-                              child: Text(
-                                'CONTINUE AS GUEST',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w900,
-                                  color: BauhausColors.gray,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                            ),
-                          ),
+                          // Container(
+                          //   width: double.infinity,
+                          //   height: 60,
+                          //   decoration: BoxDecoration(
+                          //     color: BauhausColors.lightGray,
+                          //     border: Border.all(
+                          //       color: BauhausColors.gray,
+                          //       width: 2,
+                          //     ),
+                          //   ),
+                          //   // // child: MaterialButton(
+                          //   // //   onPressed: _isLoading ? null : _skipToDemo,
+                          //   // //   child: Text(
+                          //   // //     'CONTINUE AS GUEST',
+                          //   // //     style: TextStyle(
+                          //   // //       fontSize: 14,
+                          //   // //       fontWeight: FontWeight.w900,
+                          //   // //       color: BauhausColors.gray,
+                          //   // //       letterSpacing: 2,
+                          //   // //     ),
+                          //   // //   ),
+                          //   // ),
+                          // ),
+                       
+                       
                         ],
                       ),
                     ),
@@ -493,18 +555,9 @@ class _AuthScreenState extends State<AuthScreen>
       // Sign in to Firebase with the Google [UserCredential]
       await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                SetupScreen(cameras: widget.cameras),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 600),
-          ),
-        );
-      }
+      // Navigate to appropriate screen based on onboarding status
+      await _navigateAfterSignIn();
+      
     } catch (e) {
       print('Error signing in with Google: $e');
       _showErrorDialog('SIGN IN FAILED', 'Unable to sign in with Google. Please try again.');
@@ -517,26 +570,9 @@ class _AuthScreenState extends State<AuthScreen>
     }
   }
 
-  void _skipToDemo() {
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            SetupScreen(cameras: widget.cameras),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1.0, 0.0),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-            )),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 600),
-      ),
-    );
+  void _skipToDemo() async {
+    // For guest users, always show onboarding (unless they've seen it before)
+    await _navigateAfterSignIn();
   }
 
   void _showTermsAndConditions() {

@@ -62,7 +62,7 @@ class CompletionScreen extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            '🎉',
+                            _getCompletionEmoji(overallConfidence),
                             style: TextStyle(fontSize: 48),
                           ),
                           const SizedBox(height: 8),
@@ -188,7 +188,7 @@ class CompletionScreen extends StatelessWidget {
                           child: _buildBauhausStatCard(
                             'TOTAL WORDS',
                             '$totalWords',
-                            BauhausColors.yellow,
+                            _getWordCountColor(totalWords),
                           ),
                         ),
                       ],
@@ -202,7 +202,7 @@ class CompletionScreen extends StatelessWidget {
                           child: _buildBauhausStatCard(
                             'FILLER WORDS',
                             '$totalFillerWords',
-                            totalFillerWords <= 10 ? BauhausColors.blue : BauhausColors.red,
+                            _getFillerColor(totalFillerWords),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -286,7 +286,7 @@ class CompletionScreen extends StatelessWidget {
                             color: BauhausColors.white,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: _buildBauhausFeedback(overallConfidence, totalFillerWords, overallSentiment),
+                              children: _buildBauhausFeedback(overallConfidence, totalFillerWords, overallSentiment, totalWords),
                             ),
                           ),
                         ],
@@ -322,7 +322,7 @@ class CompletionScreen extends StatelessWidget {
                     const SizedBox(height: 20),
                     
                     Text(
-                      '🍀 GREAT JOB! KEEP PRACTICING TO IMPROVE YOUR INTERVIEW SKILLS.',
+                      _getMotivationalMessage(overallConfidence),
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -391,7 +391,7 @@ class CompletionScreen extends StatelessWidget {
 
   Widget _buildBauhausQuestionResult(Map<String, dynamic> result, int index) {
     double confidence = (result['confidence'] as num?)?.toDouble() ?? 70.0;
-    Color confidenceColor = confidence > 70 ? BauhausColors.blue : BauhausColors.red;
+    Color confidenceColor = _getScoreColor(confidence); // Use same strict color coding
     
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -481,40 +481,87 @@ class CompletionScreen extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildBauhausFeedback(double confidence, int totalFillers, String sentiment) {
+  List<Widget> _buildBauhausFeedback(double confidence, int totalFillers, String sentiment, int totalWords) {
     final items = <Widget>[];
     
-    if (confidence >= 85) {
-      items.add(_buildBauhausFeedbackItem('🌟 EXCELLENT OVERALL CONFIDENCE AND PRESENCE!', BauhausColors.blue));
-    } else if (confidence >= 70) {
-      items.add(_buildBauhausFeedbackItem('👍 GOOD OVERALL PERFORMANCE WITH ROOM FOR IMPROVEMENT', BauhausColors.yellow));
-    } else if (confidence >= 50) {
-      items.add(_buildBauhausFeedbackItem('⚠️ FOCUS ON BUILDING CONFIDENCE AND IMPROVING POSTURE', BauhausColors.yellow));
+    // MUCH HARSHER: Brutally honest confidence feedback
+    if (confidence >= 80) {
+      items.add(_buildBauhausFeedbackItem('EXCELLENT PERFORMANCE! You demonstrated strong interview skills.', BauhausColors.blue));
+    } else if (confidence >= 65) {
+      items.add(_buildBauhausFeedbackItem('MEDIOCRE PERFORMANCE. You barely passed basic expectations.', BauhausColors.yellow));
+    } else if (confidence >= 45) {
+      items.add(_buildBauhausFeedbackItem('POOR PERFORMANCE. Employers would not be impressed with this level.', BauhausColors.red));
+    } else if (confidence >= 30) {
+      items.add(_buildBauhausFeedbackItem('VERY POOR PERFORMANCE. This interview would result in immediate rejection.', BauhausColors.red));
     } else {
-      items.add(_buildBauhausFeedbackItem('🔴 WORK ON CONFIDENCE, POSTURE, AND INTERVIEW PREPARATION', BauhausColors.red));
+      items.add(_buildBauhausFeedbackItem('UNACCEPTABLE PERFORMANCE. You are not ready for real interviews.', BauhausColors.red));
     }
     
-    if (totalFillers <= 5) {
-      items.add(_buildBauhausFeedbackItem('🎯 EXCELLENT SPEECH CLARITY WITH MINIMAL FILLER WORDS!', BauhausColors.blue));
-    } else if (totalFillers <= 15) {
-      items.add(_buildBauhausFeedbackItem('👌 GOOD SPEECH CONTROL, SLIGHT ROOM FOR IMPROVEMENT', BauhausColors.blue));
-    } else if (totalFillers <= 30) {
-      items.add(_buildBauhausFeedbackItem('⚠️ PRACTICE REDUCING FILLER WORDS - TRY PAUSING INSTEAD', BauhausColors.yellow));
+    // HARSHER: No mercy on filler words
+    if (totalFillers == 0) {
+      items.add(_buildBauhausFeedbackItem('PERFECT SPEECH CLARITY! No filler words detected.', BauhausColors.blue));
+    } else if (totalFillers <= 2) {
+      items.add(_buildBauhausFeedbackItem('GOOD SPEECH CONTROL with minimal filler words.', BauhausColors.blue));
+    } else if (totalFillers <= 5) {
+      items.add(_buildBauhausFeedbackItem('ACCEPTABLE SPEECH but you need to eliminate remaining filler words.', BauhausColors.yellow));
+    } else if (totalFillers <= 10) {
+      items.add(_buildBauhausFeedbackItem('TOO MANY FILLER WORDS. This shows lack of preparation and confidence.', BauhausColors.red));
+    } else if (totalFillers <= 20) {
+      items.add(_buildBauhausFeedbackItem('EXCESSIVE FILLER WORDS. Interviewers would notice this weakness immediately.', BauhausColors.red));
     } else {
-      items.add(_buildBauhausFeedbackItem('🔴 FOCUS ON ELIMINATING FILLER WORDS THROUGH PRACTICE', BauhausColors.red));
+      items.add(_buildBauhausFeedbackItem('UNACCEPTABLE FILLER WORD COUNT. This would embarrass you in real interviews.', BauhausColors.red));
     }
     
+    // HARSHER: Word count feedback with no sympathy
+    int averageWordsPerQuestion = allResults.isNotEmpty ? (totalWords / allResults.length).round() : 0;
+    if (averageWordsPerQuestion < 10) {
+      items.add(_buildBauhausFeedbackItem('PATHETIC RESPONSE LENGTH. You essentially said nothing meaningful.', BauhausColors.red));
+    } else if (averageWordsPerQuestion < 20) {
+      items.add(_buildBauhausFeedbackItem('INADEQUATE RESPONSES. Employers expect substantial answers, not one-liners.', BauhausColors.red));
+    } else if (averageWordsPerQuestion < 30) {
+      items.add(_buildBauhausFeedbackItem('BARE MINIMUM EFFORT. Your responses lack depth and detail.', BauhausColors.yellow));
+    } else {
+      items.add(_buildBauhausFeedbackItem('ADEQUATE RESPONSE LENGTH with reasonable detail.', BauhausColors.blue));
+    }
+    
+    // HARSHER: Sentiment feedback with reality check
     if (sentiment == 'Positive') {
-      items.add(_buildBauhausFeedbackItem('😊 GREAT POSITIVE ATTITUDE THROUGHOUT THE INTERVIEW!', BauhausColors.blue));
+      items.add(_buildBauhausFeedbackItem('POSITIVE ATTITUDE maintained throughout the interview.', BauhausColors.blue));
     } else if (sentiment == 'Negative') {
-      items.add(_buildBauhausFeedbackItem('⚠️ TRY TO MAINTAIN A MORE POSITIVE TONE IN RESPONSES', BauhausColors.yellow));
+      items.add(_buildBauhausFeedbackItem('NEGATIVE ATTITUDE DETECTED. Employers will not hire pessimistic candidates.', BauhausColors.red));
     } else {
-      items.add(_buildBauhausFeedbackItem('😐 CONSIDER ADDING MORE ENTHUSIASM AND ENERGY', BauhausColors.blue));
+      items.add(_buildBauhausFeedbackItem('FLAT TONE. You sound disinterested and unmotivated.', BauhausColors.yellow));
     }
     
-    items.add(_buildBauhausFeedbackItem('💡 PRACTICE REGULARLY TO BUILD CONFIDENCE AND FLUENCY', BauhausColors.blue));
-    items.add(_buildBauhausFeedbackItem('📚 RESEARCH THE COMPANY THOROUGHLY BEFORE REAL INTERVIEWS', BauhausColors.blue));
-    items.add(_buildBauhausFeedbackItem('🎯 FOCUS ON STORYTELLING WITH SPECIFIC EXAMPLES', BauhausColors.blue));
+    // BRUTAL: Performance-based recommendations with harsh reality
+    if (confidence < 40) {
+      items.add(_buildBauhausFeedbackItem('CRITICAL FAILURE: Do not apply to jobs until you significantly improve.', BauhausColors.red));
+      items.add(_buildBauhausFeedbackItem('REALITY CHECK: Companies have better candidates to choose from.', BauhausColors.red));
+      items.add(_buildBauhausFeedbackItem('URGENT ACTION NEEDED: Your current skill level guarantees rejection.', BauhausColors.red));
+    } else if (confidence < 55) {
+      items.add(_buildBauhausFeedbackItem('SIGNIFICANT WEAKNESSES: You would struggle in competitive job markets.', BauhausColors.red));
+      items.add(_buildBauhausFeedbackItem('WAKE-UP CALL: Other candidates are likely better prepared than you.', BauhausColors.red));
+    } else if (confidence < 70) {
+      items.add(_buildBauhausFeedbackItem('BELOW EXPECTATIONS: You need major improvements to compete effectively.', BauhausColors.yellow));
+      items.add(_buildBauhausFeedbackItem('HONEST ASSESSMENT: Employers expect better performance than this.', BauhausColors.yellow));
+    }
+    
+    // HARSH but constructive action items
+    if (totalFillers > 10) {
+      items.add(_buildBauhausFeedbackItem('MANDATORY: Record yourself speaking to hear how often you use fillers.', BauhausColors.red));
+    }
+    
+    if (averageWordsPerQuestion < 20) {
+      items.add(_buildBauhausFeedbackItem('REQUIRED: Practice giving 60-second responses to common questions.', BauhausColors.red));
+    }
+    
+    if (confidence < 60) {
+      items.add(_buildBauhausFeedbackItem('ESSENTIAL: Seek professional interview coaching before applying anywhere.', BauhausColors.red));
+    }
+    
+    // Standard recommendations but with edge
+    items.add(_buildBauhausFeedbackItem('REMINDER: Other candidates are practicing too - you must outwork them.', BauhausColors.yellow));
+    items.add(_buildBauhausFeedbackItem('FACT: Companies can afford to be picky in today\'s market.', BauhausColors.yellow));
     
     return items;
   }
@@ -590,17 +637,52 @@ class CompletionScreen extends StatelessWidget {
     return Duration(seconds: totalSeconds);
   }
 
+  // FIXED: Much stricter color coding
   Color _getScoreColor(double score) {
-    if (score >= 85) return BauhausColors.blue;
-    if (score >= 70) return BauhausColors.yellow;
-    if (score >= 50) return BauhausColors.yellow;
+    if (score >= 80) return BauhausColors.blue;    // Only excellent performance gets blue
+    if (score >= 65) return BauhausColors.yellow;  // Good performance gets yellow
+    return BauhausColors.red;                      // Everything else is red (poor)
+  }
+
+  // FIXED: Realistic score descriptions
+  String _getScoreText(double score) {
+    if (score >= 80) return 'EXCELLENT PERFORMANCE';
+    if (score >= 65) return 'GOOD PERFORMANCE';
+    if (score >= 45) return 'BELOW AVERAGE';
+    if (score >= 30) return 'POOR PERFORMANCE';
+    return 'VERY POOR PERFORMANCE';
+  }
+
+  // Helper methods for accurate color coding
+  Color _getFillerColor(int fillers) {
+    if (fillers <= 2) return BauhausColors.blue;
+    if (fillers <= 5) return BauhausColors.yellow;
     return BauhausColors.red;
   }
 
-  String _getScoreText(double score) {
-    if (score >= 85) return 'EXCELLENT PERFORMANCE!';
-    if (score >= 70) return 'GOOD JOB!';
-    if (score >= 50) return 'KEEP IMPROVING';
-    return 'NEEDS MORE PRACTICE';
+  Color _getWordCountColor(int totalWords) {
+    int averagePerQuestion = allResults.isNotEmpty ? (totalWords / allResults.length).round() : 0;
+    if (averagePerQuestion >= 30) return BauhausColors.blue;
+    if (averagePerQuestion >= 20) return BauhausColors.yellow;
+    return BauhausColors.red;
+  }
+
+  String _getCompletionEmoji(double score) {
+    if (score >= 80) return '🎉';
+    if (score >= 65) return '👍';
+    if (score >= 45) return '⚠️';
+    return '📚';
+  }
+
+  String _getMotivationalMessage(double score) {
+    if (score >= 80) {
+      return 'EXCELLENT WORK! You have strong interview skills. Keep practicing to maintain this level.';
+    } else if (score >= 65) {
+      return 'GOOD EFFORT! Work on identified areas to reach excellent performance.';
+    } else if (score >= 45) {
+      return 'SIGNIFICANT IMPROVEMENT NEEDED. Focus on the feedback areas before real interviews.';
+    } else {
+      return 'EXTENSIVE PRACTICE REQUIRED. Consider professional interview coaching before applying.';
+    }
   }
 }

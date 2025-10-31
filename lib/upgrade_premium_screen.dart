@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'main.dart';
-import 'package:flutter/services.dart';
+import 'subscription_service.dart';
 
 class UpgradePremiumScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   
-  const UpgradePremiumScreen({Key? key, required this.cameras}) : super(key: key);
+  const UpgradePremiumScreen({super.key, required this.cameras});
 
   @override
   State<UpgradePremiumScreen> createState() => _UpgradePremiumScreenState();
@@ -25,20 +25,45 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
   late Animation<double> _starRotation;
   
   String _selectedPlan = 'monthly';
-  List<Package> _packages = [];
+  List<ProductDetails> _products = [];
   bool _isLoading = false;
-  bool _isLoadingPackages = true;
+  bool _isLoadingProducts = true;
 
-  // RevenueCat product identifiers
-  static const String monthlyProductId = 'itago_monthly_premium';
-  static const String annualProductId = 'itago_annual_premium';
+  final SubscriptionService _subscriptionService = SubscriptionService();
+
+  // Updated Product identifiers to match your Play Console setup
+  static const String monthlyProductId = 'itsago_prod';  // Updated to match Play Console
+  static const String annualProductId = 'itsago_annual_prod';  // You'll need to create this in Play Console
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
     _startAnimations();
-    _loadOfferings();
+    _setupSubscriptionCallbacks();
+    _loadProducts();
+  }
+
+  void _setupSubscriptionCallbacks() {
+    _subscriptionService.onPurchaseSuccess = () {
+      setState(() {
+        _isLoading = false;
+      });
+      _showUpgradeSuccessDialog();
+    };
+
+    _subscriptionService.onPurchaseError = (error) {
+      setState(() {
+        _isLoading = false;
+      });
+      _showErrorDialog(error);
+    };
+
+    _subscriptionService.onPremiumStatusChanged = (isPremium) {
+      if (isPremium) {
+        print('Premium status activated');
+      }
+    };
   }
 
   void _initializeAnimations() {
@@ -96,54 +121,50 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
     _starController.repeat();
   }
 
-  Future<void> _loadOfferings() async {
+  Future<void> _loadProducts() async {
     try {
-      Offerings offerings = await Purchases.getOfferings();
-      if (offerings.current != null && offerings.current!.availablePackages.isNotEmpty) {
-        setState(() {
-          _packages = offerings.current!.availablePackages;
-          _isLoadingPackages = false;
-        });
-      } else {
-        // Fallback if no offerings configured
-        setState(() {
-          _isLoadingPackages = false;
-        });
-        _showErrorDialog('No subscription packages available. Please try again later.');
+      final products = await _subscriptionService.getAvailableProducts();
+      setState(() {
+        _products = products;
+        _isLoadingProducts = false;
+      });
+      
+      if (_products.isEmpty) {
+        _showErrorDialog('No subscription plans available. Please try again later.');
       }
     } catch (e) {
       setState(() {
-        _isLoadingPackages = false;
+        _isLoadingProducts = false;
       });
-      _showErrorDialog('Failed to load subscription packages: ${e.toString()}');
+      _showErrorDialog('Failed to load subscription plans: ${e.toString()}');
     }
   }
 
-  Package? _getPackageForPlan(String planId) {
-    if (_packages.isEmpty) return null;
+  ProductDetails? _getProductForPlan(String planId) {
+    if (_products.isEmpty) return null;
     
     try {
       if (planId == 'monthly') {
-        return _packages.firstWhere(
-          (package) => package.storeProduct.identifier == monthlyProductId,
+        return _products.firstWhere(
+          (product) => product.id == monthlyProductId,
         );
       } else if (planId == 'annual') {
-        return _packages.firstWhere(
-          (package) => package.storeProduct.identifier == annualProductId,
+        return _products.firstWhere(
+          (product) => product.id == annualProductId,
         );
       }
     } catch (e) {
-      // Package not found
+      print('Product not found for plan $planId: $e');
     }
     return null;
   }
 
   String _getFormattedPrice(String planId) {
-    final package = _getPackageForPlan(planId);
-    if (package != null) {
-      return package.storeProduct.priceString;
+    final product = _getProductForPlan(planId);
+    if (product != null) {
+      return product.price;
     }
-    // Fallback prices
+    // Fallback prices - update these based on your actual pricing
     return planId == 'monthly' ? '\$19.99' : '\$199.99';
   }
 
@@ -476,7 +497,7 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
                             
                             const SizedBox(height: 20),
 
-                            if (_isLoadingPackages)
+                            if (_isLoadingProducts)
                               Container(
                                 padding: const EdgeInsets.all(40),
                                 child: CircularProgressIndicator(
@@ -495,15 +516,16 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
                               
                               const SizedBox(height: 15),
                               
-                              // Annual plan
-                              _buildPricingPlan(
-                                'ANNUAL',
-                                _getFormattedPrice('annual'),
-                                'per year (save 17%)',
-                                'annual',
-                                BauhausColors.red,
-                                isPopular: true,
-                              ),
+                              // Annual plan (only show if available)
+                              if (_getProductForPlan('annual') != null)
+                                _buildPricingPlan(
+                                  'ANNUAL',
+                                  _getFormattedPrice('annual'),
+                                  'per year (save 17%)',
+                                  'annual',
+                                  BauhausColors.red,
+                                  isPopular: true,
+                                ),
                             ],
                             
                             const SizedBox(height: 30),
@@ -513,7 +535,7 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
                               width: double.infinity,
                               height: 80,
                               decoration: BoxDecoration(
-                                color: _isLoadingPackages 
+                                color: _isLoadingProducts 
                                     ? BauhausColors.gray 
                                     : BauhausColors.yellow,
                                 border: Border.all(
@@ -522,7 +544,7 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
                                 ),
                               ),
                               child: MaterialButton(
-                                onPressed: _isLoadingPackages ? null : _upgradeToPremium,
+                                onPressed: _isLoadingProducts ? null : _upgradeToPremium,
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
@@ -533,7 +555,7 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
                                     ),
                                     const SizedBox(width: 15),
                                     Text(
-                                      _isLoadingPackages ? 'LOADING...' : 'UPGRADE NOW',
+                                      _isLoadingProducts ? 'LOADING...' : 'UPGRADE NOW',
                                       style: TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w900,
@@ -770,10 +792,15 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
   }
 
   Future<void> _upgradeToPremium() async {
-    final package = _getPackageForPlan(_selectedPlan);
+    if (!_subscriptionService.isAvailable) {
+      _showErrorDialog('In-app purchases are not available on this device.');
+      return;
+    }
+
+    final product = _getProductForPlan(_selectedPlan);
     
-    if (package == null) {
-      _showErrorDialog('Subscription package not available. Please try again.');
+    if (product == null) {
+      _showErrorDialog('Subscription plan not available. Please try again.');
       return;
     }
 
@@ -782,59 +809,13 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
     });
 
     try {
-      CustomerInfo customerInfo = await Purchases.purchasePackage(package);
-      
-      // Check if the user now has premium access
-      if (customerInfo.entitlements.all['premium']?.isActive == true) {
-        setState(() {
-          _isLoading = false;
-        });
-        _showUpgradeSuccessDialog();
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-        _showErrorDialog('Purchase was not completed. Please try again.');
-      }
-    } on PlatformException catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      
-      String errorMessage = 'Purchase failed. Please try again.';
-      
-      // Handle specific RevenueCat error codes
-      switch (e.code) {
-        case '1': // PurchasesErrorCodeUserCancelled
-          errorMessage = 'Purchase was cancelled.';
-          break;
-        case '2': // PurchasesErrorCodeStoreError
-          errorMessage = 'Store error occurred. Please try again.';
-          break;
-        case '3': // PurchasesErrorCodePurchaseNotAllowed
-          errorMessage = 'Purchase not allowed. Please check your account settings.';
-          break;
-        case '4': // PurchasesErrorCodePurchaseInvalidError
-          errorMessage = 'Invalid purchase. Please try again.';
-          break;
-        case '5': // PurchasesErrorCodeProductNotAvailable
-          errorMessage = 'Product not available. Please try again later.';
-          break;
-        case '6': // PurchasesErrorCodeProductAlreadyPurchased
-          errorMessage = 'You already have this subscription.';
-          break;
-        default:
-          errorMessage = 'Purchase failed: ${e.message ?? 'Unknown error'}';
-      }
-      
-      if (e.code != '1') { // Don't show error for user cancellation
-        _showErrorDialog(errorMessage);
-      }
+      String productId = _selectedPlan == 'monthly' ? monthlyProductId : annualProductId;
+      await _subscriptionService.purchaseSubscription(productId);
     } catch (e) {
       setState(() {
         _isLoading = false;
       });
-      _showErrorDialog('An unexpected error occurred: ${e.toString()}');
+      _showErrorDialog('Failed to start purchase: ${e.toString()}');
     }
   }
 
@@ -844,13 +825,16 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
     });
 
     try {
-      CustomerInfo customerInfo = await Purchases.restorePurchases();
+      await _subscriptionService.restorePurchases();
+      
+      // Check if user now has premium after restore
+      final isPremium = await PremiumStatus.isPremium();
       
       setState(() {
         _isLoading = false;
       });
 
-      if (customerInfo.entitlements.all['premium']?.isActive == true) {
+      if (isPremium) {
         _showUpgradeSuccessDialog();
       } else {
         _showInfoDialog(
@@ -984,7 +968,7 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
                 child: Column(
                   children: [
                     Text(
-                      'Welcome to ITAGO Premium!',
+                      'Welcome to ITSAGO Premium!',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w900,
