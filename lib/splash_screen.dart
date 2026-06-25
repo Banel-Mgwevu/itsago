@@ -2,507 +2,237 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
+import 'app_theme.dart';
 import 'main.dart';
-import 'welcome_screen.dart';
+import 'main_menu_screen.dart';
+import 'onboarding_screen.dart';
 import 'notification_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  
-  late AnimationController _logoController;
-  late AnimationController _textController;
-  late AnimationController _geometryController;
-  late AnimationController _pulseController;
-  
-  late Animation<double> _logoScale;
-  late Animation<double> _logoOpacity;
-  late Animation<double> _textOpacity;
-  late Animation<double> _textSlide;
-  late Animation<double> _redRectScale;
-  late Animation<double> _blueCircleScale;
-  late Animation<double> _yellowTriangleScale;
-  late Animation<double> _pulseAnimation;
-  late Animation<double> _lineAnimation;
+
+  late final AnimationController _logoCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 1100));
+  late final AnimationController _textCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 900));
+  late final AnimationController _geoCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 1400));
+  late final AnimationController _pulseCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 1800));
+
+  late final Animation<double> _logoScale =
+      Tween<double>(begin: 0, end: 1).animate(
+          CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
+  late final Animation<double> _logoOpacity =
+      Tween<double>(begin: 0, end: 1).animate(
+          CurvedAnimation(parent: _logoCtrl,
+              curve: const Interval(0, 0.7, curve: Curves.easeOut)));
+  late final Animation<double> _textOpacity =
+      Tween<double>(begin: 0, end: 1).animate(
+          CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut));
+  late final Animation<double> _textSlide =
+      Tween<double>(begin: 28, end: 0).animate(
+          CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut));
+  late final Animation<double> _geoAnim =
+      Tween<double>(begin: 0, end: 1).animate(
+          CurvedAnimation(parent: _geoCtrl, curve: Curves.easeOut));
+  late final Animation<double> _lineAnim =
+      Tween<double>(begin: 0, end: 1).animate(
+          CurvedAnimation(parent: _geoCtrl,
+              curve: const Interval(0.5, 1.0, curve: Curves.easeOut)));
+  late final Animation<double> _pulse =
+      Tween<double>(begin: 0.92, end: 1.0).animate(
+          CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
-    _startAnimationSequence();
+    _runSequence();
   }
 
-  void _initializeAnimations() {
-    // Logo animations
-    _logoController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-    
-    _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: Curves.elasticOut,
-      ),
-    );
-    
-    _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: const Interval(0.0, 0.7, curve: Curves.easeOut),
-      ),
-    );
-
-    // Text animations
-    _textController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    
-    _textOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _textController,
-        curve: Curves.easeOut,
-      ),
-    );
-    
-    _textSlide = Tween<double>(begin: 30.0, end: 0.0).animate(
-      CurvedAnimation(
-        parent: _textController,
-        curve: Curves.easeOut,
-      ),
-    );
-
-    // Geometry animations
-    _geometryController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
-    
-    _redRectScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _geometryController,
-        curve: const Interval(0.0, 0.4, curve: Curves.bounceOut),
-      ),
-    );
-    
-    _blueCircleScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _geometryController,
-        curve: const Interval(0.2, 0.6, curve: Curves.bounceOut),
-      ),
-    );
-    
-    _yellowTriangleScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _geometryController,
-        curve: const Interval(0.4, 0.8, curve: Curves.bounceOut),
-      ),
-    );
-
-    _lineAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _geometryController,
-        curve: const Interval(0.6, 1.0, curve: Curves.easeOut),
-      ),
-    );
-
-    // Pulse animation
-    _pulseController = AnimationController(
-      duration: const Duration(milliseconds: 2000),
-      vsync: this,
-    );
-    
-    _pulseAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _pulseController,
-        curve: Curves.easeInOut,
-      ),
-    );
+  Future<void> _runSequence() async {
+    _geoCtrl.forward();
+    await Future.delayed(const Duration(milliseconds: 250));
+    _logoCtrl.forward();
+    await Future.delayed(const Duration(milliseconds: 500));
+    _textCtrl.forward();
+    await Future.delayed(const Duration(milliseconds: 350));
+    _pulseCtrl.repeat(reverse: true);
+    await Future.delayed(const Duration(milliseconds: 1800));
+    if (mounted) _navigate();
   }
 
-  void _startAnimationSequence() async {
-    // Start geometry first
-    _geometryController.forward();
-    
-    await Future.delayed(const Duration(milliseconds: 300));
-    
-    // Start logo
-    _logoController.forward();
-    
-    await Future.delayed(const Duration(milliseconds: 600));
-    
-    // Start text
-    _textController.forward();
-    
-    await Future.delayed(const Duration(milliseconds: 400));
-    
-    // Start subtle pulse
-    _pulseController.repeat(reverse: true);
-    
-    // Wait for all animations to complete, then navigate
-    await Future.delayed(const Duration(milliseconds: 2000));
-    
-    if (mounted) {
-      _checkAuthAndNavigate();
-    }
-  }
-
-  void _checkAuthAndNavigate() async {
+  Future<void> _navigate() async {
     try {
-      // Initialize cameras
       final cameras = await availableCameras();
-      
-      if (mounted) {
-        // Request notification permissions
-        final notificationService = NotificationService();
-        await notificationService.checkAndRequestPermissions();
-        
-        // Check if user is already authenticated
-        final user = FirebaseAuth.instance.currentUser;
-        
-        if (user != null) {
-          // User is already signed in, go directly to setup
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) =>
-                  InterviewCoachApp(cameras: cameras),
-              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-              transitionDuration: const Duration(milliseconds: 600),
-            ),
-          );
-        } else {
-          // User is not signed in, show welcome flow
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) =>
-                  WelcomeScreen(cameras: cameras),
-              transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-              transitionDuration: const Duration(milliseconds: 600),
-            ),
-          );
-        }
-      }
+      if (!mounted) return;
+      await NotificationService().checkAndRequestPermissions();
+      // Wait for Firebase Auth to restore persisted session
+      await Future.delayed(const Duration(milliseconds: 500));
+      final user = FirebaseAuth.instance.currentUser;
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => user != null
+            ? MainMenuScreen(cameras: cameras)
+            : OnboardingScreen(cameras: cameras),
+        transitionsBuilder: (_, a, __, child) =>
+            FadeTransition(opacity: a, child: child),
+        transitionDuration: const Duration(milliseconds: 600)));
     } catch (e) {
-      print('Error during initialization: $e');
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                ErrorApp(message: 'INITIALIZATION FAILED: $e'),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 600),
-          ),
-        );
-      }
+      if (mounted) Navigator.of(context).pushReplacement(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => ErrorApp(message: 'Init failed: $e'),
+        transitionsBuilder: (_, a, __, child) =>
+            FadeTransition(opacity: a, child: child),
+        transitionDuration: const Duration(milliseconds: 400)));
     }
   }
 
   @override
   void dispose() {
-    _logoController.dispose();
-    _textController.dispose();
-    _geometryController.dispose();
-    _pulseController.dispose();
+    _logoCtrl.dispose(); _textCtrl.dispose();
+    _geoCtrl.dispose();  _pulseCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: BauhausColors.white,
+      backgroundColor: AppColors.cream,
       body: AnimatedBuilder(
-        animation: Listenable.merge([
-          _logoController,
-          _textController,
-          _geometryController,
-          _pulseController,
-        ]),
-        builder: (context, child) {
-          return Stack(
+        animation: Listenable.merge([_logoCtrl, _textCtrl, _geoCtrl, _pulseCtrl]),
+        builder: (_, __) => Stack(children: [
+          // Ã¢â€â‚¬Ã¢â€â‚¬ Geometric background Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+          // Red rule Ã¢â‚¬â€ top left
+          Positioned(top: 72, left: 36,
+            child: Opacity(opacity: _geoAnim.value,
+              child: Container(
+                width: 56 * _geoAnim.value, height: 4,
+                color: AppColors.red))),
+          // Amber circle Ã¢â‚¬â€ top right bleed
+          Positioned(top: -44, right: -44,
+            child: Transform.scale(scale: _geoAnim.value,
+              child: Container(width: 130, height: 130,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.amber.withOpacity(0.18),
+                  border: Border.all(
+                    color: AppColors.amber.withOpacity(0.35), width: 1.5))))),
+          // Blue rectangle Ã¢â‚¬â€ mid left
+          Positioned(top: 220, left: -24,
+            child: Opacity(opacity: _geoAnim.value,
+              child: Container(
+                width: 56, height: 14,
+                color: AppColors.blue.withOpacity(0.25)))),
+          // Ink small square
+          Positioned(top: 290, left: 56,
+            child: Transform.scale(scale: _geoAnim.value,
+              child: Container(width: 10, height: 10, color: AppColors.ink))),
+          // Vertical ink rule Ã¢â‚¬â€ left
+          Positioned(top: 152, left: 28,
+            child: Opacity(opacity: _lineAnim.value,
+              child: Container(
+                width: 2.5,
+                height: 52 * _lineAnim.value,
+                color: AppColors.inkAt(0.35)))),
+          // Horizontal ink rule Ã¢â‚¬â€ bottom right
+          Positioned(bottom: 180, right: 36,
+            child: Opacity(opacity: _lineAnim.value,
+              child: Container(
+                width: 72 * _lineAnim.value, height: 2.5,
+                color: AppColors.inkAt(0.25)))),
+          // Red small dot Ã¢â‚¬â€ bottom left
+          Positioned(bottom: 140, left: 52,
+            child: Transform.scale(scale: _geoAnim.value,
+              child: Container(width: 8, height: 8,
+                decoration: const BoxDecoration(
+                  color: AppColors.red, shape: BoxShape.circle)))),
+
+          // Ã¢â€â‚¬Ã¢â€â‚¬ Main content Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+          Center(child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Clean geometric elements
-              
-              // Red rectangle - top left
-              Positioned(
-                top: 80,
-                left: 40,
-                child: Transform.scale(
-                  scale: _redRectScale.value,
+              // Logo box
+              Transform.scale(
+                scale: _logoScale.value * _pulse.value,
+                child: Opacity(opacity: _logoOpacity.value,
                   child: Container(
-                    width: 60,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      color: BauhausColors.red,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              ),
-              
-              // Blue circle - top right
-              Positioned(
-                top: 100,
-                right: 50,
-                child: Transform.scale(
-                  scale: _blueCircleScale.value,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: BauhausColors.blue,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ),
-              
-              // Yellow triangle - bottom left
-              Positioned(
-                bottom: 120,
-                left: 60,
-                child: Transform.scale(
-                  scale: _yellowTriangleScale.value,
-                  child: CustomPaint(
-                    size: const Size(30, 30),
-                    painter: SimpleTrianglePainter(BauhausColors.yellow),
-                  ),
-                ),
-              ),
+                    width: 110, height: 110,
+                    decoration: const BoxDecoration(
+                      color: AppColors.white,
+                      border: AppBorders.ink3,
+                      boxShadow: [AppShadows.hard5]),
+                    child: Stack(children: [
+                      // Amber block Ã¢â‚¬â€ bottom left
+                      Positioned(bottom: 0, left: 0,
+                        child: Container(width: 36, height: 36,
+                          color: AppColors.amber)),
+                      // Red dot Ã¢â‚¬â€ top right
+                      Positioned(top: 14, right: 14,
+                        child: Container(width: 16, height: 16,
+                          decoration: const BoxDecoration(
+                            color: AppColors.red,
+                            shape: BoxShape.circle))),
+                      // Blue dot Ã¢â‚¬â€ top left
+                      Positioned(top: 14, left: 14,
+                        child: Container(width: 8, height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppColors.blue,
+                            shape: BoxShape.circle))),
+                      // Letter
+                      Center(child: Text('I',
+                        style: AppText.display.copyWith(
+                          fontSize: 46, letterSpacing: 2))),
+                    ])))),
 
-              // Animated lines
-              Positioned(
-                bottom: 200,
-                right: 40,
-                child: Opacity(
-                  opacity: _lineAnimation.value,
-                  child: Container(
-                    width: 80 * _lineAnimation.value,
-                    height: 3,
-                    color: BauhausColors.black,
-                  ),
-                ),
-              ),
+              const SizedBox(height: 36),
 
-              Positioned(
-                top: 180,
-                left: 30,
-                child: Opacity(
-                  opacity: _lineAnimation.value,
-                  child: Container(
-                    width: 3,
-                    height: 60 * _lineAnimation.value,
-                    color: BauhausColors.black,
-                  ),
-                ),
-              ),
-              
-              // Main logo and content
-              Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Animated logo
-                    Transform.scale(
-                      scale: _logoScale.value * _pulseAnimation.value,
-                      child: Opacity(
-                        opacity: _logoOpacity.value,
-                        child: Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            color: BauhausColors.white,
-                            border: Border.all(
-                              color: BauhausColors.black,
-                              width: 4,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Stack(
-                            children: [
-                              // Minimal geometric pattern
-                              Positioned(
-                                top: 15,
-                                right: 15,
-                                child: Container(
-                                  width: 20,
-                                  height: 20,
-                                  decoration: BoxDecoration(
-                                    color: BauhausColors.red,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                bottom: 15,
-                                left: 15,
-                                child: Container(
-                                  width: 15,
-                                  height: 25,
-                                  color: BauhausColors.yellow,
-                                ),
-                              ),
-                              Positioned(
-                                top: 15,
-                                left: 15,
-                                child: Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: BauhausColors.blue,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              ),
-                              // App initial
-                              Center(
-                                child: Text(
-                                  'I',
-                                  style: TextStyle(
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.w900,
-                                    color: BauhausColors.black,
-                                    letterSpacing: 2,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 40),
-                    
-                    // App name with clean typography
-                    Transform.translate(
-                      offset: Offset(0, _textSlide.value),
-                      child: Opacity(
-                        opacity: _textOpacity.value,
-                        child: Column(
-                          children: [
-                            Text(
-                              'ITSAGO',
-                              style: TextStyle(
-                                fontSize: 42,
-                                fontWeight: FontWeight.w900,
-                                color: BauhausColors.black,
-                                letterSpacing: 6,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            // Clean line separator
-                            Container(
-                              width: 120,
-                              height: 3,
-                              color: BauhausColors.red,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'AI INTERVIEW PREP',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: BauhausColors.gray,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              // Minimal loading indicator
-              Positioned(
-                bottom: 60,
-                left: 0,
-                right: 0,
-                child: Opacity(
-                  opacity: _textOpacity.value,
-                  child: Column(
-                    children: [
-                      // Simple progress dots
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(3, (index) {
-                          return AnimatedBuilder(
-                            animation: _pulseController,
-                            builder: (context, child) {
-                              double delay = index * 0.3;
-                              double animValue = ((_pulseController.value - delay) % 1.0);
-                              return Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 4),
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: BauhausColors.black.withOpacity(
-                                    0.3 + (animValue * 0.7)
-                                  ),
-                                  shape: BoxShape.circle,
-                                ),
-                              );
-                            },
-                          );
-                        }),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'INITIALIZING',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: BauhausColors.gray,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+              // App name
+              Transform.translate(
+                offset: Offset(0, _textSlide.value),
+                child: Opacity(opacity: _textOpacity.value,
+                  child: Column(children: [
+                    Text('ITSAGO',
+                      style: AppText.display.copyWith(letterSpacing: 7, fontSize: 40)),
+                    const SizedBox(height: 10),
+                    // Colour rule
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 32, height: 3, color: AppColors.red),
+                      Container(width: 32, height: 3, color: AppColors.amber),
+                      Container(width: 32, height: 3, color: AppColors.blue),
+                    ]),
+                    const SizedBox(height: 12),
+                    Text('AI INTERVIEW PREP',
+                      style: AppText.label.copyWith(color: AppColors.dim, fontSize: 10)),
+                  ]))),
+
+              const SizedBox(height: 56),
+
+              // Loading dots
+              Opacity(opacity: _textOpacity.value,
+                child: Column(children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(3, (i) {
+                      double v = ((_pulseCtrl.value - i * 0.28) % 1.0).clamp(0.0, 1.0);
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 7, height: 7,
+                        decoration: BoxDecoration(
+                          color: AppColors.inkAt(0.25 + v * 0.75),
+                          shape: BoxShape.circle));
+                    })),
+                  const SizedBox(height: 10),
+                  Text('INITIALISING',
+                    style: AppText.label.copyWith(color: AppColors.dim)),
+                ])),
+            ])),
+        ]),
       ),
     );
   }
-}
-
-// Simple triangle painter
-class SimpleTrianglePainter extends CustomPainter {
-  final Color color;
-  
-  SimpleTrianglePainter(this.color);
-  
-  @override
-  void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    
-    Path path = Path();
-    path.moveTo(size.width / 2, 0);
-    path.lineTo(0, size.height);
-    path.lineTo(size.width, size.height);
-    path.close();
-    
-    canvas.drawPath(path, paint);
-  }
-  
-  @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
 }

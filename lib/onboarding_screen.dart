@@ -1,822 +1,272 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'main.dart';
+import 'app_theme.dart';
 import 'main_menu_screen.dart';
+import 'purpose_selection_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  
-  const OnboardingScreen({Key? key, required this.cameras}) : super(key: key);
-
+  const OnboardingScreen({super.key, required this.cameras});
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen>
     with TickerProviderStateMixin {
-  PageController _pageController = PageController();
-  int _currentPage = 0;
-  
-  late AnimationController _fadeController;
-  late AnimationController _slideController;
-  late AnimationController _scaleController;
-  late AnimationController _rotationController;
-  
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _rotationAnimation;
 
-  @override
-  void initState() {
-    super.initState();
-    
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-    
-    _slideController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-    
-    _scaleController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    
-    _rotationController = AnimationController(
-      duration: const Duration(milliseconds: 2000),
-      vsync: this,
-    );
-    
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _fadeController, curve: Curves.easeOut),
-    );
-    
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _slideController, curve: Curves.elasticOut));
-    
-    _scaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _scaleController, curve: Curves.bounceOut),
-    );
-    
-    _rotationAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _rotationController, curve: Curves.linear),
-    );
-    
-    // Start animations
-    _fadeController.forward();
-    _slideController.forward();
-    _scaleController.forward();
-    _rotationController.repeat();
-  }
+  final PageController _pages = PageController();
+  int _current = 0;
+
+  late final AnimationController _slideCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 700))..forward();
+  late final AnimationController _scaleCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 800))..forward();
+
+  Animation<double> _fade(double a, double b) => Tween<double>(begin: 0, end: 1)
+      .animate(CurvedAnimation(parent: _slideCtrl,
+          curve: Interval(a, b, curve: Curves.easeOut)));
+  Animation<Offset> _slide(double a, double b) =>
+      Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero)
+          .animate(CurvedAnimation(parent: _slideCtrl,
+              curve: Interval(a, b, curve: Curves.easeOut)));
+  late final Animation<double> _scaleAnim = Tween<double>(begin: 0, end: 1)
+      .animate(CurvedAnimation(parent: _scaleCtrl, curve: Curves.elasticOut));
 
   @override
   void dispose() {
-    _fadeController.dispose();
-    _slideController.dispose();
-    _scaleController.dispose();
-    _rotationController.dispose();
-    _pageController.dispose();
+    _pages.dispose(); _slideCtrl.dispose(); _scaleCtrl.dispose();
     super.dispose();
   }
 
-  void _nextPage() {
-    if (_currentPage < 3) {
-      _pageController.nextPage(
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeInOut,
-      );
+  void _next() {
+    if (_current < _slides.length - 1) {
+      _pages.nextPage(
+        duration: const Duration(milliseconds: 500), curve: Curves.easeOut);
     } else {
-      _finishOnboarding();
+      _finish();
     }
   }
 
-  void _finishOnboarding() {
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            MainMenuScreen(cameras: widget.cameras),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0.0, 1.0),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOut,
-              )),
-              child: child,
-            ),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 800),
-      ),
-    );
+  void _finish() => Navigator.of(context).pushReplacement(PageRouteBuilder(
+    pageBuilder: (_, __, ___) => PurposeSelectionScreen(cameras: widget.cameras),
+    transitionsBuilder: (_, a, __, child) => FadeTransition(
+      opacity: a, child: child),
+    transitionDuration: const Duration(milliseconds: 600)));
+
+  void _onPageChanged(int i) {
+    setState(() => _current = i);
+    _scaleCtrl.reset(); _scaleCtrl.forward();
+    _slideCtrl.reset(); _slideCtrl.forward();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: BauhausColors.lightGray,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // Animated background elements
-            _buildAnimatedBackground(),
-            
-            // Main content
-            PageView(
-              controller: _pageController,
-              onPageChanged: (index) {
-                setState(() {
-                  _currentPage = index;
-                });
-                // Restart animations for new page
-                _scaleController.reset();
-                _scaleController.forward();
-              },
-              children: [
-                _buildWelcomePage(),
-                _buildFeaturePage1(),
-                _buildFeaturePage2(),
-                _buildFeaturePage3(),
-                _buildFinalPage(),
-              ],
-            ),
-            
-            // Skip button
-            if (_currentPage < 4)
-              Positioned(
-                top: 20,
-                right: 20,
-                child: AnimatedBuilder(
-                  animation: _fadeAnimation,
-                  builder: (context, child) {
-                    return Opacity(
-                      opacity: _fadeAnimation.value,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: BauhausColors.white,
-                          border: Border.all(color: BauhausColors.black, width: 2),
-                        ),
-                        child: MaterialButton(
-                          onPressed: _finishOnboarding,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                          child: Text(
-                            'SKIP',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                              color: BauhausColors.black,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            
-            // Page indicators and navigation
-            if (_currentPage < 4)
-              Positioned(
-                bottom: 30,
-                left: 0,
-                right: 0,
-                child: Column(
-                  children: [
-                    // Page indicators
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(4, (index) {
-                        return AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          width: _currentPage == index ? 30 : 10,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: _currentPage == index 
-                                ? BauhausColors.red 
-                                : BauhausColors.gray,
-                          ),
-                        );
-                      }),
-                    ),
-                    
-                    const SizedBox(height: 30),
-                    
-                    // Next button
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40),
-                      child: Container(
-                        width: double.infinity,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: BauhausColors.blue,
-                          border: Border.all(color: BauhausColors.black, width: 3),
-                        ),
-                        child: MaterialButton(
-                          onPressed: _nextPage,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                _currentPage == 3 ? 'GET STARTED' : 'NEXT',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                  color: BauhausColors.white,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Icon(
-                                _currentPage == 3 ? Icons.rocket_launch : Icons.arrow_forward,
-                                color: BauhausColors.white,
-                                size: 20,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAnimatedBackground() {
-    return AnimatedBuilder(
-      animation: _rotationAnimation,
-      builder: (context, child) {
-        return Stack(
-          children: [
-            // Floating geometric shapes
-            Positioned(
-              top: 100 + (50 * _rotationAnimation.value),
-              right: 50,
-              child: Transform.rotate(
-                angle: _rotationAnimation.value * 6.28,
-                child: Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.yellow.withOpacity(0.3),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 300 - (30 * _rotationAnimation.value),
-              left: 30,
-              child: Transform.rotate(
-                angle: -_rotationAnimation.value * 6.28,
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  color: BauhausColors.red.withOpacity(0.2),
-                ),
-              ),
-            ),
-            Positioned(
-              bottom: 200 + (40 * _rotationAnimation.value),
-              right: 80,
+      backgroundColor: AppColors.cream,
+      body: SafeArea(child: Column(children: [
+        // ── Header bar ──────────────────────────────────
+        Container(
+          color: AppColors.ink,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(children: [
+            // Progress dots
+            Row(children: List.generate(_slides.length, (i) =>
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                margin: const EdgeInsets.only(right: 6),
+                width: _current == i ? 24 : 8, height: 4,
+                color: _current == i ? AppColors.amber : AppColors.inkAt(0.3)))),
+            const Spacer(),
+            AppWidgets.badge('ITSAGO AI'),
+            const SizedBox(width: 8),
+            // Skip
+            GestureDetector(
+              onTap: _finish,
               child: Container(
-                width: 80,
-                height: 20,
-                color: BauhausColors.blue.withOpacity(0.3),
-              ),
-            ),
-          ],
-        );
-      },
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: const BoxDecoration(
+                  border: AppBorders.amber1),
+                child: Text('SKIP',
+                  style: AppText.label.copyWith(color: AppColors.amber)))),
+          ])),
+
+        // ── Pages ────────────────────────────────────────
+        Expanded(child: PageView.builder(
+          controller: _pages,
+          onPageChanged: _onPageChanged,
+          itemCount: _slides.length,
+          itemBuilder: (_, i) => _buildSlide(_slides[i]))),
+
+        // ── Bottom nav ───────────────────────────────────
+        Container(
+          color: AppColors.white,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(children: [
+            Container(height: 1.5, color: AppColors.mist),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: _next,
+              child: Container(
+                width: double.infinity, height: 56,
+                decoration: BoxDecoration(
+                  color: _slides[_current].accent,
+                  border: AppBorders.ink2,
+                  boxShadow: const [AppShadows.hard4]),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(_current == _slides.length - 1
+                        ? 'GET STARTED' : 'NEXT',
+                      style: AppText.button.copyWith(
+                        color: _slides[_current].accent == AppColors.amber
+                          ? AppColors.ink : Colors.white,
+                        letterSpacing: 2)),
+                    const SizedBox(width: 10),
+                    Icon(
+                      _current == _slides.length - 1
+                        ? Icons.rocket_launch_rounded
+                        : Icons.arrow_forward_rounded,
+                      color: _slides[_current].accent == AppColors.amber
+                        ? AppColors.ink : Colors.white,
+                      size: 18),
+                  ])),
+          )]),
+        ),
+      ])),
     );
   }
 
-  Widget _buildWelcomePage() {
-    return Padding(
-      padding: const EdgeInsets.all(40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Logo animation
-          AnimatedBuilder(
-            animation: _scaleAnimation,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _scaleAnimation.value,
-                child: Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.blue,
-                    border: Border.all(color: BauhausColors.black, width: 4),
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: BauhausColors.yellow,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                      Center(
-                        child: Text(
-                          'I',
-                          style: TextStyle(
-                            fontSize: 48,
-                            fontWeight: FontWeight.w900,
-                            color: BauhausColors.white,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 40),
-          
-          // Welcome text
-          SlideTransition(
-            position: _slideAnimation,
-            child: Column(
-              children: [
-                Text(
-                  'WELCOME TO',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.gray,
-                    letterSpacing: 3,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'ITSAGO',
-                  style: TextStyle(
-                    fontSize: 42,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.black,
-                    letterSpacing: 6,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 15),
-                Container(
-                  width: 100,
-                  height: 4,
-                  color: BauhausColors.red,
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Your AI-powered interview preparation companion',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: BauhausColors.gray,
-                    letterSpacing: 1,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildSlide(_Slide s) {
+    final isAmber = s.accent == AppColors.amber;
+    final iconFg = isAmber ? AppColors.ink : Colors.white;
+    return AnimatedBuilder(
+      animation: Listenable.merge([_slideCtrl, _scaleCtrl]),
+      builder: (_, __) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Icon box
+            Transform.scale(scale: _scaleAnim.value,
+              child: Container(
+                width: 130, height: 130,
+                decoration: BoxDecoration(
+                  color: s.accent,
+                  border: AppBorders.ink3,
+                  boxShadow: [AppShadows.hard5]),
+                child: Stack(children: [
+                  // Geometric inset
+                  Positioned(top: 0, right: 0,
+                    child: Container(width: 28, height: 28,
+                      color: isAmber
+                        ? AppColors.inkAt(0.1)
+                        : Colors.white.withOpacity(0.12))),
+                  Positioned(bottom: 10, left: 10,
+                    child: Container(width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isAmber
+                          ? AppColors.inkAt(0.15)
+                          : Colors.white.withOpacity(0.2)))),
+                  Center(child: Icon(s.icon, size: 52, color: iconFg)),
+                ]))),
 
-  Widget _buildFeaturePage1() {
-    return Padding(
-      padding: const EdgeInsets.all(40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Feature icon
-          AnimatedBuilder(
-            animation: _scaleAnimation,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _scaleAnimation.value,
-                child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.red,
-                    border: Border.all(color: BauhausColors.black, width: 4),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.video_camera_front,
-                        size: 60,
-                        color: BauhausColors.white,
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: 40,
-                        height: 3,
-                        color: BauhausColors.white,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 50),
-          
-          // Feature description
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: Column(
-              children: [
-                Text(
-                  'PRACTICE',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.black,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  'INTERVIEWS',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.red,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                Text(
-                  'Experience realistic AI-powered mock interviews tailored to your industry and role',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: BauhausColors.gray,
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                // Feature highlights
-                _buildFeatureHighlight('• Real-time video analysis'),
-                _buildFeatureHighlight('• Industry-specific questions'),
-                _buildFeatureHighlight('• Instant feedback & scoring'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+            const SizedBox(height: 36),
 
-  Widget _buildFeaturePage2() {
-    return Padding(
-      padding: const EdgeInsets.all(40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Feature icon
-          AnimatedBuilder(
-            animation: _scaleAnimation,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _scaleAnimation.value,
-                child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.yellow,
-                    border: Border.all(color: BauhausColors.black, width: 4),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.psychology,
-                        size: 60,
-                        color: BauhausColors.black,
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: 40,
-                        height: 3,
-                        color: BauhausColors.black,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 50),
-          
-          // Feature description
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: Column(
-              children: [
-                Text(
-                  'AI COACH',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.black,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  'ASSISTANCE',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.yellow,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                Text(
-                  'Get personalized coaching and calendar-aware preparation strategies',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: BauhausColors.gray,
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                // Feature highlights
-                _buildFeatureHighlight('• 24/7 AI coaching support'),
-                _buildFeatureHighlight('• Calendar integration'),
-                _buildFeatureHighlight('• Personalized strategies'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+            // Label
+            FadeTransition(opacity: _fade(0.2, 0.7),
+              child: AppWidgets.sectionLabel(
+                s.tagline, accent: s.accent)),
 
-  Widget _buildFeaturePage3() {
-    return Padding(
-      padding: const EdgeInsets.all(40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Feature icon
-          AnimatedBuilder(
-            animation: _scaleAnimation,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _scaleAnimation.value,
-                child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.blue,
-                    border: Border.all(color: BauhausColors.black, width: 4),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.library_books,
-                        size: 60,
-                        color: BauhausColors.white,
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: 40,
-                        height: 3,
-                        color: BauhausColors.white,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 50),
-          
-          // Feature description
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: Column(
-              children: [
-                Text(
-                  'PREMIUM',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.black,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  'RESOURCES',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.blue,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                Text(
-                  'Access comprehensive guides, tips, and strategies from industry experts',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: BauhausColors.gray,
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                // Feature highlights
-                _buildFeatureHighlight('• Expert interview guides'),
-                _buildFeatureHighlight('• Industry-specific tips'),
-                _buildFeatureHighlight('• Success strategies'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+            const SizedBox(height: 14),
 
-  Widget _buildFinalPage() {
-    return Padding(
-      padding: const EdgeInsets.all(40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Success icon
-          AnimatedBuilder(
-            animation: _scaleAnimation,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _scaleAnimation.value,
+            // Title
+            FadeTransition(opacity: _fade(0.25, 0.75),
+              child: SlideTransition(position: _slide(0.25, 0.75),
+                child: Text(s.title,
+                  style: AppText.display.copyWith(fontSize: 32, height: 1.0),
+                  textAlign: TextAlign.left))),
+
+            const SizedBox(height: 16),
+
+            // Description card
+            FadeTransition(opacity: _fade(0.35, 0.9),
+              child: SlideTransition(position: _slide(0.35, 0.9),
                 child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.yellow,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: BauhausColors.black, width: 4),
-                  ),
-                  child: Icon(
-                    Icons.rocket_launch,
-                    size: 60,
-                    color: BauhausColors.black,
-                  ),
-                ),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 50),
-          
-          // Final message
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: Column(
-              children: [
-                Text(
-                  'YOU\'RE ALL',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.black,
-                    letterSpacing: 4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  'SET!',
-                  style: TextStyle(
-                    fontSize: 42,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.red,
-                    letterSpacing: 6,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 30),
-                Text(
-                  'Ready to ace your next interview? Let\'s get started with ITSAGO!',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: BauhausColors.gray,
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 50),
-                // CTA Button
-                Container(
                   width: double.infinity,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: BauhausColors.blue,
-                    border: Border.all(color: BauhausColors.black, width: 4),
-                  ),
-                  child: MaterialButton(
-                    onPressed: _finishOnboarding,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'START YOUR JOURNEY',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                            color: BauhausColors.white,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                        // const SizedBox(width: 10),
-                        Icon(
-                          Icons.arrow_forward,
-                          color: BauhausColors.white,
-                          size: 24,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+                  decoration: AppDecorations.cardSmall,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                    Container(height: 4, color: s.accent),
+                    Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Text(s.desc, style: AppText.body)),
+                    // Feature bullets
+                    ...s.bullets.map((b) => Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                        Container(width: 6, height: 6,
+                          margin: const EdgeInsets.only(top: 4, right: 10),
+                          color: s.accent),
+                        Expanded(child: Text(b, style: AppText.caption.copyWith(
+                          height: 1.4, fontSize: 11))),
+                      ]))),
+                    const SizedBox(height: 4),
+                  ])))),
+          ])));
   }
 
-  Widget _buildFeatureHighlight(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            color: BauhausColors.red,
-          ),
-          const SizedBox(width: 15),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: BauhausColors.black,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  static final List<_Slide> _slides = [
+    _Slide(
+      accent:  AppColors.ink,
+      icon:    Icons.waving_hand_rounded,
+      tagline: 'WELCOME',
+      title:   'MEET\nITSAGO',
+      desc:    'Your AI interview coach and CV builder. Get hired faster, starting today.',
+      bullets: ['Practice anytime, anywhere', 'AI that adapts to your role', 'Free to use']),
+    _Slide(
+      accent:  AppColors.red,
+      icon:    Icons.video_camera_front_rounded,
+      tagline: 'FEATURE 01',
+      title:   'PRACTICE\nINTERVIEWS',
+      desc:    'Realistic AI-powered mock sessions tailored to your industry and target company.',
+      bullets: ['Real-time video & audio analysis', 'Industry-specific questions', 'Instant scoring & feedback']),
+    _Slide(
+      accent:  AppColors.blue,
+      icon:    Icons.psychology_rounded,
+      tagline: 'FEATURE 02',
+      title:   'AI\nCOACH',
+      desc:    'Your personal AI career coach. Get tailored advice, interview tips and strategies — anytime you need them.',
+      bullets: ['Personalised interview strategy', 'Industry-specific tips', '24/7 AI career support']),
+    _Slide(
+      accent:  AppColors.red,
+      icon:    Icons.auto_fix_high_rounded,
+      tagline: 'FEATURE 03',
+      title:   'ATS CV\nBUILDER',
+      desc:    'Upload your CV and our AI rewrites it to beat ATS filters — then builds 4 job-ready designs you can send today.',
+      bullets: ['4 Bauhaus-inspired templates', 'ATS compatibility scoring', 'Download PDF & Word']),
+    _Slide(
+      accent:  AppColors.red,
+      icon:    Icons.rocket_launch_rounded,
+      tagline: 'LET\'S GO',
+      title:   'YOU\'RE\nREADY',
+      desc:    'Everything you need to walk into your next interview with total confidence.',
+      bullets: ['Start practising in seconds', 'No credit card needed', 'Built in South Africa 🇿🇦']),
+  ];
 }
+
+class _Slide {
+  final Color    accent;
+  final IconData icon;
+  final String   tagline;
+  final String   title;
+  final String   desc;
+  final List<String> bullets;
+  const _Slide({
+    required this.accent, required this.icon, required this.tagline,
+    required this.title, required this.desc, required this.bullets});
+}
+

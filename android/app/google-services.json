@@ -22,11 +22,35 @@
           }
         },
         {
+          "client_id": "415467037952-bj3bm7thh072g8lj812ggj47pk80crsg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.itsago.interviewai",
+            "certificate_hash": "f965f662998aeb768e41631b2211b79f9efebfae"
+          }
+        },
+        {
+          "client_id": "415467037952-j2opjpvfftvg7t0v4u6n7llh1fa3l6re.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.itsago.interviewai",
+            "certificate_hash": "f8f65315b0173d50200e25466e2c4a157d86003e"
+          }
+        },
+        {
           "client_id": "415467037952-jfpffdnjd8dnikst9q2adipnt7ceekd4.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.itsago.interviewai",
             "certificate_hash": "fee8c4af7f01ad208e99e9ccaad315f478f969bd"
+          }
+        },
+        {
+          "client_id": "415467037952-qtmlo6m147huio2750oun395o7s7vb0s.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.itsago.interviewai",
+            "certificate_hash": "99208f89b1fa71f3a270d42b1ff9cae70fe4903c"
           }
         },
         {

@@ -1,5 +1,4 @@
-import 'dart:convert';
-import 'package:flutter/material.dart';
+﻿import 'dart:convert';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -14,1052 +13,352 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  static const String channelId = 'interview_reminders';
-  static const String channelName = 'Interview Reminders';
-  static const String channelDescription = 'Notifications for upcoming interviews';
-  
-  static const String _permissionKey = 'notification_permission_requested';
-  static const String _enabledKey = 'notifications_enabled';
+  static const String _permissionKey     = 'notification_permission_requested';
+  static const String _enabledKey        = 'notifications_enabled';
   static const String _lastMotivationKey = 'last_motivation_date';
 
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
-  final GoogleCalendarService _calendarService = GoogleCalendarService();
-  
+  final FlutterLocalNotificationsPlugin _notif = FlutterLocalNotificationsPlugin();
+  final GoogleCalendarService _calendar = GoogleCalendarService();
+
   bool _isInitialized = false;
   List<CalendarEvent> _scheduledInterviews = [];
-  Set<int> _activeCalendarNotificationIds = {};
+  final Set<int> _activeCalendarIds = {};
 
-  // Enhanced interview coaching motivation messages
-  final List<String> _motivationalMessages = [
-    "Ready to ace your next interview? Let's practice! 🎯",
-    "Your dream job is just one great interview away! ✨",
-    "Confidence comes from preparation. Let's build yours! 💪",
-    "Turn interview anxiety into excitement with practice! 🌟",
-    "Every 'no' brings you closer to your 'yes'. Keep practicing! 📈",
-    "Your future self will thank you for practicing today! 🙏",
-    "Small daily practice leads to interview mastery! 🎊",
-    "The best time to practice was yesterday. The second best is now! ⏰",
-    "Success happens when preparation meets opportunity! 🎪",
-    "You're closer to landing your dream job than you think! 🎯",
-    "Practice doesn't make perfect, it makes confident! 📚",
-    "Today's practice is tomorrow's success story! 🚀",
-    "Master the STAR method with just 5 minutes of practice! ⭐",
-    "Great interviews start with great preparation! 💼",
-    "Your skills deserve the spotlight. Let's practice! 🔦",
-    "Interview like a pro with daily practice sessions! 🏆",
-    "Nail behavioral questions with focused practice! 🎭",
-    "Technical interviews? You've got this with practice! 👨‍💻",
-    "Salary negotiation confidence starts with preparation! 💰",
-    "Transform nerves into interview superpowers! ⚡",
-    "Practice makes permanent. Make excellence permanent! 💎",
-    "Every practice session is an investment in your career! 📊",
-    "Level up your interview game with ITSAGO! 🎮",
-    "From good to great - one practice session at a time! 📱",
-    "Your competition is practicing. Are you? 🏃‍♂️",
+  final List<String> _motivational = [
+    'Your next interview could be your breakthrough moment. Practise now.',
+    'Top candidates in SA practise daily. Are you ready?',
+    'Confidence is built one session at a time. Let us go.',
+    'From Etwatwa to Sandton — every great hire prepared first.',
+    'Your dream job at a top SA company starts with preparation.',
+    'Recruiters notice candidates who are prepared. Be that person.',
+    'Five minutes of practice today beats regret after the interview.',
+    'Nervous about your next interview? Practise until you are not.',
+    'South African employers want confident communicators. Become one.',
+    'Every session builds the version of you that lands the job.',
+    'The candidate who prepares most gets the offer. That is you.',
+    'Filler words cost you offers. Practise eliminating them today.',
+    'Great answers do not happen by accident — they are practised.',
+    'Hustle smart. Practise with ITSAGO and walk into that interview ready.',
+    'Mzansi is full of talent. Show them yours — practise today.',
+    'That job is waiting for someone prepared enough to take it.',
+  ];
+  final List<String> _lowScore = [
+    'Your last session scored below 50%. A quick practice now will make a real difference.',
+    'Great candidates bounce back fast. Your next practice session is waiting.',
+    'Low score? That\'s just feedback. Come back and nail it.',
+    'Every top performer had sessions like that. What matters is coming back.',
+    'Your score tells you where to improve — not where you\'ll stay.',
   ];
 
-  // Comeback message variations
-  final List<String> _comebackMessages = [
-    "Your interview skills are waiting! Come back and practice. 🎯",
-    "Missing you! Let's continue building your confidence. 💪",
-    "Your dream job won't wait. Time for a quick practice! ⏰",
-    "Ready to turn anxiety into confidence? Let's practice! 🌟",
-    "Your future employer is looking for someone like you! 🔍",
-    "5 minutes of practice = tons of confidence! Come back! ⭐",
-    "Great interviews don't happen by accident. Let's practice! 🎪",
-    "Your success story starts with preparation. Continue practicing! 📖",
-    "Missing our practice sessions? Your skills need you! 🎭",
-    "Come back and master your next interview! 🏆",
+  final List<String> _highScore = [
+    'You scored above 75% last session. Keep that momentum going!',
+    'Strong performance! One more session and you\'re interview-ready.',
+    'You\'re building real interview confidence. Don\'t stop now.',
+    'Top score! Consistency separates good from great.',
+    'You\'re on a roll. Book that interview — you\'re getting ready.',
   ];
 
-  // Different notification titles
-  final List<String> _notificationTitles = [
-    "ITSAGO - Practice Time! 🎯",
-    "ITSAGO - Let's Ace This! 💪",
-    "ITSAGO - Your Success Awaits! ✨",
-    "ITSAGO - Confidence Builder! 🌟",
-    "ITSAGO - Interview Mastery! 🏆",
-    "ITSAGO - Dream Job Prep! 💼",
-    "ITSAGO - Skill Building Time! 📈",
-    "ITSAGO - Success Starts Now! 🚀",
+  final List<String> _comeback = [
+    'Your interview skills need regular practice to stay sharp. Come back.',
+    'A quick 5-minute session keeps your confidence high. Ready?',
+    'Don\'t let your preparation slip. Your next interview could be soon.',
+    'Your future employer is interviewing candidates today. Are you ready?',
+    'Consistency wins interviews. Come back and keep your streak going.',
+    'You were making great progress. One session gets you back on track.',
+    'Your competition hasn\'t stopped practising. Neither should you.',
+    'It\'s been a while. A quick session is all it takes to stay sharp.',
   ];
 
-  // Initialize the notification service
+  final List<String> _titles = [
+    'ITSAGO — Practice Time',
+    'ITSAGO — Stay Sharp',
+    'ITSAGO — Keep Going',
+    'ITSAGO — You\'ve Got This',
+    'ITSAGO — Interview Ready?',
+    'ITSAGO — Build Confidence',
+    'ITSAGO — Daily Prep',
+    'ITSAGO — One More Session',
+  ];
+
+  // ── Init ─────────────────────────────────────────────────────
+
   Future<void> initialize() async {
     if (_isInitialized) return;
-
-    print('🔧 [NOTIF] Initializing Enhanced NotificationService...');
-
-    // Initialize timezone data
     tz.initializeTimeZones();
-    print('🌍 [NOTIF] Timezone initialized');
-
-    // Android settings
-    const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    
-    // iOS settings
-    const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-
-    const InitializationSettings settings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
-
-    await _notifications.initialize(
-      settings,
-      onDidReceiveNotificationResponse: _onNotificationTapped,
-    );
-
-    // Create notification channels for Android
-    await _createNotificationChannels();
-    
+    const settings = InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true));
+    await _notif.initialize(settings,
+        onDidReceiveNotificationResponse: _onTapped);
+    await _createChannels();
     _isInitialized = true;
-    print('✅ [NOTIF] Enhanced NotificationService initialized successfully');
   }
 
-  // Create enhanced notification channels
-  Future<void> _createNotificationChannels() async {
-    if (Platform.isAndroid) {
-      print('📺 [NOTIF] Creating enhanced notification channels...');
-      
-      // PERSISTENT Interview reminders channel - High priority, ongoing
-      const AndroidNotificationChannel interviewChannel = AndroidNotificationChannel(
-        channelId,
-        channelName,
-        description: '$channelDescription (Persistent until opened)',
-        importance: Importance.max, // Maximum importance for persistent notifications
-        enableVibration: true,
-        playSound: true,
-        showBadge: true,
-      );
-
-      // Test channel
-      const AndroidNotificationChannel testChannel = AndroidNotificationChannel(
-        'test_channel',
-        'Test Notifications',
-        description: 'Test notifications to verify ITSAGO system works perfectly',
-        importance: Importance.high,
-        playSound: true,
-        enableVibration: true,
-      );
-
-      // Comeback channel
-      const AndroidNotificationChannel comebackChannel = AndroidNotificationChannel(
-        'comeback_channel',
-        'Practice Reminders',
-        description: 'Gentle reminders to continue your interview preparation journey',
-        importance: Importance.high,
-        playSound: true,
-        enableVibration: true,
-      );
-
-      // Daily motivation channel - Lower importance, dismissible
-      const AndroidNotificationChannel dailyChannel = AndroidNotificationChannel(
-        'daily_motivation',
-        'Daily Interview Coaching',
-        description: 'Daily motivation and tips to master your interview skills',
-        importance: Importance.defaultImportance, // Normal importance for motivation
-        playSound: false, // Less intrusive
-        enableVibration: false,
-        showBadge: false,
-      );
-
-      // Achievement channel
-      const AndroidNotificationChannel achievementChannel = AndroidNotificationChannel(
-        'achievements',
-        'Success Milestones',
-        description: 'Celebrate your interview preparation achievements',
-        importance: Importance.high,
-        playSound: true,
-        enableVibration: true,
-      );
-
-      final androidImplementation = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      
-      await androidImplementation?.createNotificationChannel(interviewChannel);
-      await androidImplementation?.createNotificationChannel(testChannel);
-      await androidImplementation?.createNotificationChannel(comebackChannel);
-      await androidImplementation?.createNotificationChannel(dailyChannel);
-      await androidImplementation?.createNotificationChannel(achievementChannel);
-
-      print('✅ [NOTIF] Enhanced notification channels created');
+  Future<void> _createChannels() async {
+    if (!Platform.isAndroid) return;
+    final plugin = _notif.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    const channels = [
+      AndroidNotificationChannel('interview_reminders', 'Interview Reminders',
+          description: 'Notifications for upcoming interviews',
+          importance: Importance.max, enableVibration: true, playSound: true),
+      AndroidNotificationChannel('comeback_channel', 'Practice Reminders',
+          description: 'Reminders to continue interview preparation',
+          importance: Importance.high, playSound: true, enableVibration: true),
+      AndroidNotificationChannel('daily_motivation', 'Daily Coaching',
+          description: 'Daily motivation for interview skills',
+          importance: Importance.defaultImportance,
+          playSound: false, enableVibration: false, showBadge: false),
+      AndroidNotificationChannel('achievements', 'Achievements',
+          description: 'Celebrate your preparation milestones',
+          importance: Importance.high, playSound: true, enableVibration: true),
+      AndroidNotificationChannel('score_feedback', 'Score Feedback',
+          description: 'Personalised feedback based on your scores',
+          importance: Importance.high, playSound: true, enableVibration: true),
+    ];
+    for (final ch in channels) {
+      await plugin?.createNotificationChannel(ch);
     }
   }
 
-  // Enhanced permission request
-  Future<bool> requestPermissions() async {
-    return await checkAndRequestPermissions();
-  }
+  // ── Permissions ──────────────────────────────────────────────
 
-  // Enhanced permission request with detailed flow
+  Future<bool> requestPermissions() => checkAndRequestPermissions();
+
   Future<bool> checkAndRequestPermissions() async {
-    print('🔐 [NOTIF] Checking enhanced notification permissions...');
     final prefs = await SharedPreferences.getInstance();
-    final hasRequestedBefore = prefs.getBool(_permissionKey) ?? false;
-
-    print('📝 [NOTIF] Has requested before: $hasRequestedBefore');
-
-    if (!hasRequestedBefore) {
-      print('🆕 [NOTIF] First time - requesting permissions');
-      return await _requestPermissions();
-    } else {
-      // Check current status
-      final isEnabled = await _areNotificationsEnabled();
-      print('🔍 [NOTIF] Current permission status: $isEnabled');
-      return isEnabled;
-    }
+    if (!(prefs.getBool(_permissionKey) ?? false)) return _requestPerms();
+    return _enabled();
   }
 
-  Future<bool> _requestPermissions() async {
+  Future<bool> _requestPerms() async {
     final prefs = await SharedPreferences.getInstance();
-    
     try {
-      print('🙏 [NOTIF] Requesting notification permissions...');
-      
       bool granted = false;
-      
       if (Platform.isAndroid) {
-        print('🤖 [NOTIF] Requesting Android permissions...');
-        
-        // Request basic notification permission
-        final notificationPermission = await Permission.notification.request();
-        print('📱 [NOTIF] Notification permission result: $notificationPermission');
-        
-        // Request exact alarm permission for Android 12+ (API level 31+)
-        bool exactAlarmGranted = true;
-        try {
-          final exactAlarmPermission = await Permission.scheduleExactAlarm.request();
-          print('⏰ [NOTIF] Exact alarm permission result: $exactAlarmPermission');
-          exactAlarmGranted = exactAlarmPermission == PermissionStatus.granted;
-        } catch (e) {
-          print('⚠️ [NOTIF] Exact alarm permission not available on this device: $e');
-          exactAlarmGranted = true; // Assume granted on older Android versions
-        }
-
-        granted = notificationPermission == PermissionStatus.granted && exactAlarmGranted;
+        final n = await Permission.notification.request();
+        bool exact = true;
+        try { exact = await Permission.scheduleExactAlarm.request() == PermissionStatus.granted; } catch (_) {}
+        granted = n == PermissionStatus.granted && exact;
       } else {
-        // For iOS, request permissions through the local notifications plugin
-        final iosSettings = await _notifications
-            .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
-            ?.requestPermissions(
-              alert: true,
-              badge: true,
-              sound: true,
-            );
-        granted = iosSettings ?? false;
+        final plugin = _notif.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+        granted = await plugin?.requestPermissions(alert: true, badge: true, sound: true) ?? false;
       }
-
       await prefs.setBool(_permissionKey, true);
       await prefs.setBool(_enabledKey, granted);
-
-      print('💾 [NOTIF] Saved permission state: $granted');
-
-      if (granted) {
-        print('🔄 [NOTIF] Scheduling initial notifications...');
-        await _scheduleImprovedDailyMotivation();
-        // Show immediate welcome notification
-        await showWelcomeNotification();
-      }
-
+      if (granted) await _scheduleDaily();
       return granted;
-    } catch (e) {
-      print('❌ [NOTIF] Error requesting permissions: $e');
+    } catch (_) {
       await prefs.setBool(_permissionKey, true);
       await prefs.setBool(_enabledKey, false);
       return false;
     }
   }
 
-  Future<bool> _areNotificationsEnabled() async {
+  Future<bool> _enabled() async {
     try {
       if (Platform.isAndroid) {
-        final notificationStatus = await Permission.notification.status;
-        
-        // Check exact alarm permission for Android 12+
-        bool exactAlarmEnabled = true;
-        try {
-          final exactAlarmStatus = await Permission.scheduleExactAlarm.status;
-          exactAlarmEnabled = exactAlarmStatus == PermissionStatus.granted;
-        } catch (e) {
-          print('⚠️ [NOTIF] Exact alarm permission check failed (likely older Android): $e');
-          exactAlarmEnabled = true; // Assume granted on older versions
-        }
-        
-        bool enabled = notificationStatus == PermissionStatus.granted && exactAlarmEnabled;
-        print('🔍 [NOTIF] Android notification status: $enabled (notif: $notificationStatus, exact: $exactAlarmEnabled)');
-        return enabled;
-      } else {
-        // For iOS, assume enabled if we've made it this far
-        return true;
+        final n = await Permission.notification.status;
+        bool exact = true;
+        try { exact = await Permission.scheduleExactAlarm.status == PermissionStatus.granted; } catch (_) {}
+        return n == PermissionStatus.granted && exact;
       }
-    } catch (e) {
-      print('❌ [NOTIF] Error checking notification status: $e');
-      return false;
-    }
+      return true;
+    } catch (_) { return false; }
   }
 
-  // Handle notification tap
-  void _onNotificationTapped(NotificationResponse response) {
-    print('📱 [NOTIF] Notification tapped: ${response.payload}');
-    
-    // If it's a calendar notification, remove it from active set and cancel it
-    if (response.payload != null && response.id != null) {
-      try {
-        final data = jsonDecode(response.payload!);
-        final action = data['action'] as String?;
-        final notificationId = response.id!; // Safe to use ! since we checked above
-        
-        if (action == 'interview_reminder') {
-          print('📅 [NOTIF] Calendar notification opened - removing persistent notification');
-          _activeCalendarNotificationIds.remove(notificationId);
-          _notifications.cancel(notificationId);
-        }
-        
-        if (action == 'open_ai_coach') {
-          // Navigate to AI Coach screen
-          // This would need to be handled by the main app
-          print('🎯 Opening AI Coach for interview prep');
-        }
-      } catch (e) {
-        print('Error parsing notification payload: $e');
-      }
-    }
-  }
+  // ── Score-based notifications ─────────────────────────────────
 
-  // Show welcome notification
-  Future<void> showWelcomeNotification() async {
-    print('🎉 [NOTIF] Showing welcome notification...');
-    
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'test_channel',
-      'Test Notifications',
-      channelDescription: 'Welcome to your interview success journey',
-      importance: Importance.high,
-      priority: Priority.high,
-      icon: '@mipmap/ic_launcher',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    try {
-      await _notifications.show(
-        888,
-        'ITSAGO - Welcome! 🎉',
-        'Your interview success journey starts now. Notifications are active!',
-        platformChannelSpecifics,
-        payload: 'welcome_notification',
-      );
-      print('✅ [NOTIF] Welcome notification shown successfully');
-    } catch (e) {
-      print('❌ [NOTIF] Error showing welcome notification: $e');
-    }
-  }
-
-  // Schedule notifications for all upcoming interviews
-  Future<void> scheduleInterviewNotifications() async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-
-    try {
-      // Get upcoming interviews from calendar
-      final interviews = await _calendarService.getInterviewEvents();
-      
-      // Clear old interview notifications
-      await _clearInterviewNotifications();
-      
-      // Schedule new notifications
-      for (final interview in interviews) {
-        if (interview.isUpcoming) {
-          await _scheduleNotificationsForInterview(interview);
-        }
-      }
-      
-      _scheduledInterviews = interviews;
-      print('📅 Scheduled persistent notifications for ${interviews.length} interviews');
-      
-    } catch (e) {
-      print('❌ Error scheduling notifications: $e');
-    }
-  }
-
-  // Schedule all notifications for a single interview (PERSISTENT)
-  Future<void> _scheduleNotificationsForInterview(CalendarEvent interview) async {
-    final now = DateTime.now();
-    final interviewTime = interview.startTime;
-    
-    // Generate unique IDs for each notification
-    final baseId = interview.id.hashCode;
-    
-    // 3 days before
-    final threeDaysBefore = interviewTime.subtract(const Duration(days: 3));
-    if (threeDaysBefore.isAfter(now)) {
-      final notificationId = baseId + 1;
-      await _schedulePersistentNotification(
-        id: notificationId,
-        title: '📅 Interview in 3 Days!',
-        body: 'You have "${interview.title}" coming up. Start preparing now!',
-        scheduledTime: threeDaysBefore,
-        payload: _createInterviewPayload(interview, '3_days', notificationId),
-        priority: 'high',
-      );
-      _activeCalendarNotificationIds.add(notificationId);
-    }
-
-    // 2 days before
-    final twoDaysBefore = interviewTime.subtract(const Duration(days: 2));
-    if (twoDaysBefore.isAfter(now)) {
-      final notificationId = baseId + 2;
-      await _schedulePersistentNotification(
-        id: notificationId,
-        title: '⏰ Interview in 2 Days',
-        body: 'Time to review: "${interview.title}". Practice your answers!',
-        scheduledTime: twoDaysBefore,
-        payload: _createInterviewPayload(interview, '2_days', notificationId),
-        priority: 'high',
-      );
-      _activeCalendarNotificationIds.add(notificationId);
-    }
-
-    // 1 day before
-    final oneDayBefore = interviewTime.subtract(const Duration(days: 1));
-    if (oneDayBefore.isAfter(now)) {
-      final notificationId = baseId + 3;
-      await _schedulePersistentNotification(
-        id: notificationId,
-        title: '🚀 Interview Tomorrow!',
-        body: 'Final prep for "${interview.title}". Get your questions ready!',
-        scheduledTime: oneDayBefore,
-        payload: _createInterviewPayload(interview, '1_day', notificationId),
-        priority: 'max',
-      );
-      _activeCalendarNotificationIds.add(notificationId);
-    }
-
-    // 6 hours before
-    final sixHoursBefore = interviewTime.subtract(const Duration(hours: 6));
-    if (sixHoursBefore.isAfter(now)) {
-      final notificationId = baseId + 4;
-      await _schedulePersistentNotification(
-        id: notificationId,
-        title: '⚡ Interview in 6 Hours!',
-        body: 'Last chance prep for "${interview.title}". Review key points!',
-        scheduledTime: sixHoursBefore,
-        payload: _createInterviewPayload(interview, '6_hours', notificationId),
-        priority: 'max',
-      );
-      _activeCalendarNotificationIds.add(notificationId);
-    }
-
-    // On the day (2 hours before)
-    final twoHoursBefore = interviewTime.subtract(const Duration(hours: 2));
-    if (twoHoursBefore.isAfter(now)) {
-      final notificationId = baseId + 5;
-      await _schedulePersistentNotification(
-        id: notificationId,
-        title: '🎯 Interview Today!',
-        body: 'Your interview "${interview.title}" is in 2 hours. You\'ve got this!',
-        scheduledTime: twoHoursBefore,
-        payload: _createInterviewPayload(interview, 'today', notificationId),
-        priority: 'max',
-      );
-      _activeCalendarNotificationIds.add(notificationId);
-    }
-
-    // 30 minutes before
-    final thirtyMinutesBefore = interviewTime.subtract(const Duration(minutes: 30));
-    if (thirtyMinutesBefore.isAfter(now)) {
-      final notificationId = baseId + 6;
-      await _schedulePersistentNotification(
-        id: notificationId,
-        title: '🔥 Interview Starting Soon!',
-        body: '"${interview.title}" starts in 30 minutes. Take a deep breath!',
-        scheduledTime: thirtyMinutesBefore,
-        payload: _createInterviewPayload(interview, '30_minutes', notificationId),
-        priority: 'max',
-      );
-      _activeCalendarNotificationIds.add(notificationId);
-    }
-
-    print('📱 Scheduled 6 PERSISTENT notifications for: ${interview.title}');
-  }
-
-  // Schedule a PERSISTENT notification (can't be dismissed unless opened in app)
-  Future<void> _schedulePersistentNotification({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime scheduledTime,
-    required String payload,
-    required String priority,
+  Future<void> onInterviewCompleted({
+    required double avgScore,
+    required String company,
+    required int questionCount,
   }) async {
-    try {
-      // Create PERSISTENT notification details
-      AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-        channelId,
-        channelName,
-        channelDescription: channelDescription,
-        importance: priority == 'max' ? Importance.max : Importance.high,
-        priority: priority == 'max' ? Priority.max : Priority.high,
-        icon: '@mipmap/ic_launcher',
-        enableVibration: true,
-        playSound: true,
-        ongoing: true, // Makes notification persistent (can't be swiped away)
-        autoCancel: false, // Prevents auto-dismissal
-        showWhen: true,
-        when: scheduledTime.millisecondsSinceEpoch,
-        fullScreenIntent: priority == 'max', // Full screen for urgent notifications
-        category: AndroidNotificationCategory.event,
-        visibility: NotificationVisibility.public,
-      );
-
-      const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-        interruptionLevel: InterruptionLevel.timeSensitive,
-      );
-
-      final notificationDetails = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
-      await _notifications.zonedSchedule(
-        id,
-        title,
-        body,
-        tz.TZDateTime.from(scheduledTime, tz.local),
-        notificationDetails,
-        payload: payload,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      );
-
-      print('⏰ Scheduled PERSISTENT notification: $title at ${scheduledTime.toString()}');
-    } catch (e) {
-      print('❌ Failed to schedule persistent notification: $e');
-    }
-  }
-
-  // Create payload for interview notification
-  String _createInterviewPayload(CalendarEvent interview, String timing, int notificationId) {
-    return jsonEncode({
-      'action': 'interview_reminder',
-      'interview_id': interview.id,
-      'interview_title': interview.title,
-      'timing': timing,
-      'start_time': interview.startTime.toIso8601String(),
-      'notification_id': notificationId,
-    });
-  }
-
-  // IMPROVED Daily motivational notifications - consistent schedule
-  Future<void> _scheduleImprovedDailyMotivation() async {
-    print('📅 [NOTIF] Scheduling IMPROVED daily motivational notifications...');
-    
-    // Cancel existing motivation notifications
-    for (int i = 0; i < 10; i++) {
-      await _notifications.cancel(200 + i);
-    }
-    
-    // Schedule consistent daily notifications at fixed times
-    final motivationTimes = [
-      {'hour': 9, 'minute': 0, 'type': 'morning'},   // 9:00 AM
-      {'hour': 18, 'minute': 30, 'type': 'evening'}, // 6:30 PM
-    ];
-
-    final Random random = Random();
-    
-    for (int dayOffset = 0; dayOffset < 7; dayOffset++) { // Schedule for next 7 days
-      for (int timeIndex = 0; timeIndex < motivationTimes.length; timeIndex++) {
-        final timeSlot = motivationTimes[timeIndex];
-        final hour = timeSlot['hour'] as int;
-        final minute = timeSlot['minute'] as int;
-        final type = timeSlot['type'] as String;
-        
-        // Create unique ID
-        final notificationId = 200 + (dayOffset * 2) + timeIndex;
-        
-        // Get random message and title
-        String randomMessage = _motivationalMessages[random.nextInt(_motivationalMessages.length)];
-        String randomTitle = _notificationTitles[random.nextInt(_notificationTitles.length)];
-        
-        // Calculate schedule time
-        final now = DateTime.now();
-        var scheduleTime = DateTime(
-          now.year,
-          now.month,
-          now.day + dayOffset,
-          hour,
-          minute,
-        );
-        
-        // Skip if time has passed today
-        if (dayOffset == 0 && scheduleTime.isBefore(now)) {
-          continue;
-        }
-        
-        await _scheduleDismissibleMotivation(
-          id: notificationId,
-          title: randomTitle,
-          body: randomMessage,
-          scheduledTime: scheduleTime,
-          type: type,
-        );
-        
-        print('📱 [NOTIF] Scheduled $type motivation for day $dayOffset at $hour:${minute.toString().padLeft(2, '0')}');
-      }
-    }
-    
-    // Save last scheduling date
+    if (!_isInitialized) await initialize();
+    if (!await _enabled()) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_lastMotivationKey, DateTime.now().toIso8601String());
-    
-    print('✅ [NOTIF] All improved daily motivation notifications scheduled');
-  }
-
-  // Schedule dismissible motivation notification
-  Future<void> _scheduleDismissibleMotivation({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime scheduledTime,
-    required String type,
-  }) async {
-    try {
-      const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-        'daily_motivation',
-        'Daily Interview Coaching',
-        channelDescription: 'Daily motivation and tips for interview success',
-        importance: Importance.defaultImportance, // Normal importance
-        priority: Priority.defaultPriority,
-        icon: '@mipmap/ic_launcher',
-        playSound: false, // Less intrusive
-        enableVibration: false,
-        ongoing: false, // Can be dismissed
-        autoCancel: true, // Auto dismiss when tapped
-        showWhen: false,
-        category: AndroidNotificationCategory.recommendation,
-      );
-
-      const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: false,
-        presentSound: false,
-      );
-
-      const NotificationDetails platformChannelSpecifics = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
-      await _notifications.zonedSchedule(
-        id,
-        title,
-        body,
-        tz.TZDateTime.from(scheduledTime, tz.local),
-        platformChannelSpecifics,
-        payload: 'daily_motivation_$type',
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      );
-
-      print('✅ [NOTIF] Scheduled dismissible $type motivation at $scheduledTime');
-    } catch (e) {
-      print('❌ [NOTIF] Error scheduling motivation notification: $e');
+    await prefs.setDouble('last_score', avgScore);
+    final rng = Random();
+    if (avgScore >= 75) {
+      await _now(id: 500, ch: 'achievements', chName: 'Achievements',
+        title: 'Strong Session — ${avgScore.round()}%',
+        body: _highScore[rng.nextInt(_highScore.length)]);
+    } else if (avgScore >= 50) {
+      await _now(id: 501, ch: 'achievements', chName: 'Achievements',
+        title: 'Good Effort — ${avgScore.round()}%',
+        body: 'You\'re building momentum. Come back tomorrow to push that score higher.');
+    } else {
+      await _now(id: 502, ch: 'score_feedback', chName: 'Score Feedback',
+        title: 'Keep Practising — ${avgScore.round()}%',
+        body: _lowScore[rng.nextInt(_lowScore.length)]);
+      await _schedule(id: 503, ch: 'comeback_channel', chName: 'Practice Reminders',
+        title: 'Time to Improve That Score',
+        body: 'Your last session at $company scored ${avgScore.round()}%. A focused practice now will help.',
+        scheduledTime: DateTime.now().add(const Duration(hours: 23)));
     }
   }
 
-  // Check and reschedule motivation if needed
+  // ── Calendar interview notifications ─────────────────────────
+
+  Future<void> scheduleInterviewNotifications() async {
+    if (!_isInitialized) await initialize();
+    try {
+      final interviews = await _calendar.getInterviewEvents();
+      await _clearInterviewNotifications();
+      for (final i in interviews) {
+        if (i.isUpcoming) await _scheduleForInterview(i);
+      }
+      _scheduledInterviews = interviews;
+    } catch (e) { print('Error scheduling: $e'); }
+  }
+
+  Future<void> _scheduleForInterview(CalendarEvent interview) async {
+    final now  = DateTime.now();
+    final time = interview.startTime;
+    final base = interview.id.hashCode;
+    final slots = [
+      (time.subtract(const Duration(days: 3)),    base + 1, 'Interview in 3 Days',  '📅'),
+      (time.subtract(const Duration(days: 2)),    base + 2, 'Interview in 2 Days',  '⏰'),
+      (time.subtract(const Duration(days: 1)),    base + 3, 'Interview Tomorrow!',  '🚀'),
+      (time.subtract(const Duration(hours: 6)),   base + 4, 'Interview in 6 Hours', '⚡'),
+      (time.subtract(const Duration(hours: 2)),   base + 5, 'Interview Today',      '🎯'),
+      (time.subtract(const Duration(minutes: 30)), base + 6,'Starting in 30 Min',   '🔥'),
+    ];
+    for (final slot in slots) {
+      final schedTime = slot.$1;
+      final nid       = slot.$2;
+      final title     = slot.$3;
+      final emoji     = slot.$4;
+      if (schedTime.isAfter(now)) {
+        await _schedule(
+          id: nid, ch: 'interview_reminders', chName: 'Interview Reminders',
+          title: '$emoji $title',
+          body: '"${interview.title}" — tap to do a quick practice session.',
+          scheduledTime: schedTime, persistent: true);
+        _activeCalendarIds.add(nid);
+      }
+    }
+  }
+
+  // ── Daily motivation ─────────────────────────────────────────
+
+  Future<void> _scheduleDaily() async {
+    for (int i = 0; i < 14; i++) { await _notif.cancel(200 + i); }
+    final rng = Random();
+    final now = DateTime.now();
+    final times = [{'h': 8, 'm': 30}, {'h': 18, 'm': 0}];
+    int id = 200;
+    for (int day = 0; day < 7; day++) {
+      for (final t in times) {
+        final schedTime = DateTime(now.year, now.month, now.day + day, t['h']!, t['m']!);
+        if (schedTime.isBefore(now)) { id++; continue; }
+        await _schedule(
+          id: id++,
+          ch: 'daily_motivation', chName: 'Daily Coaching',
+          title: _titles[rng.nextInt(_titles.length)],
+          body:  _motivational[rng.nextInt(_motivational.length)],
+          scheduledTime: schedTime, sound: false);
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastMotivationKey, now.toIso8601String());
+  }
+
   Future<void> checkMotivationSchedule() async {
     final prefs = await SharedPreferences.getInstance();
-    final lastScheduled = prefs.getString(_lastMotivationKey);
-    
-    if (lastScheduled == null) {
-      print('🔄 [NOTIF] No previous motivation schedule found - scheduling now');
-      await _scheduleImprovedDailyMotivation();
-      return;
-    }
-    
-    final lastDate = DateTime.parse(lastScheduled);
-    final daysDifference = DateTime.now().difference(lastDate).inDays;
-    
-    if (daysDifference >= 3) { // Reschedule every 3 days to ensure consistency
-      print('🔄 [NOTIF] Motivation schedule is $daysDifference days old - rescheduling');
-      await _scheduleImprovedDailyMotivation();
-    } else {
-      print('✅ [NOTIF] Motivation schedule is current ($daysDifference days old)');
-    }
+    final last  = prefs.getString(_lastMotivationKey);
+    if (last == null || DateTime.now().difference(DateTime.parse(last)).inDays >= 3) {
+      await _scheduleDaily();
+    } else { print('Motivation schedule current.'); }
   }
 
-  // Show achievement notification
-  Future<void> showAchievementNotification(String achievement) async {
-    print('🏆 [NOTIF] Showing achievement notification: $achievement');
-    
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'achievements',
-      'Success Milestones',
-      channelDescription: 'Celebrate your interview preparation achievements',
-      importance: Importance.high,
-      priority: Priority.high,
-      icon: '@mipmap/ic_launcher',
-      playSound: true,
-      enableVibration: true,
-    );
+  // ── App lifecycle ─────────────────────────────────────────────
 
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    try {
-      await _notifications.show(
-        777,
-        'ITSAGO - Achievement Unlocked! 🏆',
-        achievement,
-        platformChannelSpecifics,
-        payload: 'achievement_notification',
-      );
-      print('✅ [NOTIF] Achievement notification shown successfully');
-    } catch (e) {
-      print('❌ [NOTIF] Error showing achievement notification: $e');
-    }
-  }
-
-  // App lifecycle methods
   Future<void> onAppPaused() async {
-    print('⏸️ [NOTIF] App paused - scheduling enhanced comeback notification');
-    final isEnabled = await _areNotificationsEnabled();
-    print('📋 [NOTIF] Notifications enabled: $isEnabled');
-    
-    if (isEnabled) {
-      await _scheduleComebackNotification();
-    } else {
-      print('❌ [NOTIF] Notifications not enabled, skipping comeback notification');
-    }
+    if (!await _enabled()) return;
+    final prefs     = await SharedPreferences.getInstance();
+    final lastScore = prefs.getDouble('last_score');
+    final rng       = Random();
+    final body = (lastScore != null && lastScore < 50)
+        ? _lowScore[rng.nextInt(_lowScore.length)]
+        : _comeback[rng.nextInt(_comeback.length)];
+    await _schedule(
+      id: 1, ch: 'comeback_channel', chName: 'Practice Reminders',
+      title: 'ITSAGO — Stay Sharp',
+      body: body,
+      scheduledTime: DateTime.now().add(const Duration(hours: 24)));
   }
 
   Future<void> onAppResumed() async {
-    print('▶️ [NOTIF] App resumed - canceling comeback notification');
-    try {
-      await _notifications.cancel(1);
-      print('✅ [NOTIF] Comeback notification cancelled');
-      
-      // Check motivation schedule when app resumes
-      await checkMotivationSchedule();
-    } catch (e) {
-      print('❌ [NOTIF] Error cancelling comeback notification: $e');
-    }
-  }
-
-  Future<void> _scheduleComebackNotification() async {
-    print('⏰ [NOTIF] Scheduling enhanced comeback notification...');
-    
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'comeback_channel',
-      'Practice Reminders',
-      channelDescription: 'Gentle reminders to continue your interview journey',
-      importance: Importance.high,
-      priority: Priority.high,
-      icon: '@mipmap/ic_launcher',
-      showWhen: true,
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    // Get random comeback message
-    final Random random = Random();
-    final comebackMessage = _comebackMessages[random.nextInt(_comebackMessages.length)];
-
-    // Schedule for different intervals based on user behavior
-    final scheduledDate = DateTime.now().add(const Duration(hours: 2)); // 2 hours for testing
-    final tzScheduledDate = tz.TZDateTime.from(scheduledDate, tz.local);
-    
-    print('📅 [NOTIF] Enhanced comeback notification scheduled for: $tzScheduledDate');
-    print('🕒 [NOTIF] Current time: ${tz.TZDateTime.now(tz.local)}');
-    
-    try {
-      await _notifications.zonedSchedule(
-        1,
-        'ITSAGO - We Miss You! 👋',
-        comebackMessage,
-        tzScheduledDate,
-        platformChannelSpecifics,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: 'comeback_notification',
-      );
-      print('✅ [NOTIF] Enhanced comeback notification scheduled successfully');
-      
-    } catch (e) {
-      print('❌ [NOTIF] Error scheduling comeback notification: $e');
-    }
-  }
-
-  // Clear old interview notifications
-  Future<void> _clearInterviewNotifications() async {
-    // Cancel previous interview notifications (using known ID ranges)
-    for (final interview in _scheduledInterviews) {
-      final baseId = interview.id.hashCode;
-      for (int i = 1; i <= 6; i++) {
-        final notificationId = baseId + i;
-        await _notifications.cancel(notificationId);
-        _activeCalendarNotificationIds.remove(notificationId);
-      }
-    }
-    print('🧹 Cleared old interview notifications');
-  }
-
-  // Check for new interviews and update notifications
-  Future<void> checkForNewInterviews() async {
-    if (!_calendarService.isSignedIn) return;
-
-    try {
-      final currentInterviews = await _calendarService.getInterviewEvents();
-      
-      // Check if there are new interviews
-      final newInterviews = currentInterviews.where((current) =>
-        !_scheduledInterviews.any((scheduled) => scheduled.id == current.id)
-      ).toList();
-
-      if (newInterviews.isNotEmpty) {
-        print('🆕 Found ${newInterviews.length} new interviews');
-        
-        // Schedule persistent notifications for new interviews
-        for (final interview in newInterviews) {
-          if (interview.isUpcoming) {
-            await _scheduleNotificationsForInterview(interview);
-          }
-        }
-        
-        // Update scheduled list
-        _scheduledInterviews = currentInterviews;
-      }
-    } catch (e) {
-      print('❌ Error checking for new interviews: $e');
-    }
-  }
-
-  // Test notifications
-  Future<void> sendTestNotification() async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-
-    print('🧪 [NOTIF] Showing enhanced test notification...');
-    
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'test_channel',
-      'Test Notifications',
-      channelDescription: 'Test notifications to verify ITSAGO system works',
-      importance: Importance.high,
-      priority: Priority.high,
-      icon: '@mipmap/ic_launcher',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    try {
-      await _notifications.show(
-        999,
-        'ITSAGO - System Check! 🧪',
-        'Perfect! Notifications are working. Your interview coach is ready!',
-        platformChannelSpecifics,
-        payload: 'test_notification',
-      );
-      print('✅ [NOTIF] Enhanced test notification shown successfully');
-    } catch (e) {
-      print('❌ [NOTIF] Error showing test notification: $e');
-    }
-  }
-
-  // Test persistent notification
-  Future<void> sendTestPersistentNotification() async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-
-    print('🧪 [NOTIF] Showing test PERSISTENT notification...');
-    
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      channelId,
-      channelName,
-      channelDescription: 'Test persistent interview notification',
-      importance: Importance.max,
-      priority: Priority.max,
-      icon: '@mipmap/ic_launcher',
-      ongoing: true, // Makes it persistent
-      autoCancel: false, // Can't be dismissed by swiping
-      playSound: true,
-      enableVibration: true,
-      showWhen: true,
-      category: AndroidNotificationCategory.event,
-    );
-
-    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-      interruptionLevel: InterruptionLevel.timeSensitive,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    final testPayload = jsonEncode({
-      'action': 'interview_reminder',
-      'interview_id': 'test_interview',
-      'interview_title': 'Test Interview',
-      'timing': 'test',
-      'start_time': DateTime.now().add(const Duration(hours: 2)).toIso8601String(),
-      'notification_id': 9999,
-    });
-
-    try {
-      await _notifications.show(
-        9999,
-        'ITSAGO - Test Persistent! 🧪',
-        'This is a persistent notification - only opening the app will dismiss it!',
-        platformChannelSpecifics,
-        payload: testPayload,
-      );
-      _activeCalendarNotificationIds.add(9999);
-      print('✅ [NOTIF] Test persistent notification shown successfully');
-    } catch (e) {
-      print('❌ [NOTIF] Error showing test persistent notification: $e');
-    }
-  }
-
-  // Get pending notifications (for debugging)
-  Future<List<PendingNotificationRequest>> getPendingNotifications() async {
-    return await _notifications.pendingNotificationRequests();
-  }
-
-  // Cancel all notifications
-  Future<void> cancelAllNotifications() async {
-    await _notifications.cancelAll();
-    _scheduledInterviews.clear();
-    _activeCalendarNotificationIds.clear();
-    print('🚫 Cancelled all notifications');
-  }
-
-  // Cancel only persistent calendar notifications
-  Future<void> cancelPersistentNotifications() async {
-    for (final notificationId in _activeCalendarNotificationIds) {
-      await _notifications.cancel(notificationId);
-    }
-    _activeCalendarNotificationIds.clear();
-    print('🚫 Cancelled all persistent calendar notifications');
-  }
-
-  // Auto-schedule notifications when calendar is synced
-  Future<void> onCalendarSynced() async {
-    print('📅 Calendar synced, scheduling persistent notifications...');
-    await scheduleInterviewNotifications();
-  }
-
-  // Background task to periodically check for updates
-  Future<void> performBackgroundCheck() async {
-    print('🔄 Performing background notification check...');
-    await checkForNewInterviews();
+    await _notif.cancel(1);
     await checkMotivationSchedule();
   }
 
-  // Debug method to show all pending notifications
-  Future<void> debugPendingNotifications() async {
+  // ── Helpers ───────────────────────────────────────────────────
+
+  Future<void> _now({required int id, required String ch, required String chName,
+      required String title, required String body}) async {
+    await _notif.show(id, title, body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(ch, chName,
+          importance: Importance.high, priority: Priority.high,
+          icon: '@mipmap/ic_launcher', playSound: true, enableVibration: true),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true, presentBadge: true, presentSound: true)));
+  }
+
+  Future<void> _schedule({required int id, required String ch, required String chName,
+      required String title, required String body, required DateTime scheduledTime,
+      bool persistent = false, bool sound = true}) async {
     try {
-      final pendingNotifications = await _notifications.pendingNotificationRequests();
-      print('📋 [NOTIF] Pending notifications: ${pendingNotifications.length}');
-      
-      int calendarCount = 0;
-      int motivationCount = 0;
-      int otherCount = 0;
-      
-      for (var notification in pendingNotifications) {
-        print('   - ID: ${notification.id}, Title: ${notification.title}, Body: ${notification.body}');
-        
-        // Categorize notifications
-        if (_activeCalendarNotificationIds.contains(notification.id)) {
-          calendarCount++;
-        } else if (notification.id >= 200 && notification.id < 300) {
-          motivationCount++;
-        } else {
-          otherCount++;
-        }
+      await _notif.zonedSchedule(id, title, body,
+        tz.TZDateTime.from(scheduledTime, tz.local),
+        NotificationDetails(
+          android: AndroidNotificationDetails(ch, chName,
+            importance: persistent ? Importance.max : Importance.high,
+            priority:   persistent ? Priority.max   : Priority.high,
+            icon: '@mipmap/ic_launcher',
+            ongoing: persistent, autoCancel: !persistent,
+            playSound: sound, enableVibration: sound),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true, presentBadge: true, presentSound: true)),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle);
+    } catch (e) { print('Schedule failed $id: $e'); }
+  }
+
+  void _onTapped(NotificationResponse r) {
+    if (r.payload == null || r.id == null) return;
+    try {
+      final data = jsonDecode(r.payload!);
+      if (data['action'] == 'interview_reminder') {
+        _activeCalendarIds.remove(r.id);
+        _notif.cancel(r.id!);
       }
-      
-      print('📊 [NOTIF] Breakdown: $calendarCount calendar, $motivationCount motivation, $otherCount other');
-      print('🔒 [NOTIF] Active persistent calendar notifications: ${_activeCalendarNotificationIds.length}');
-      
-      if (pendingNotifications.isEmpty) {
-        print('⚠️ [NOTIF] No pending notifications found - this might indicate a scheduling issue');
+    } catch (_) {}
+  }
+
+  Future<void> _clearInterviewNotifications() async {
+    for (final i in _scheduledInterviews) {
+      final base = i.id.hashCode;
+      for (int j = 1; j <= 6; j++) {
+        await _notif.cancel(base + j);
+        _activeCalendarIds.remove(base + j);
       }
-    } catch (e) {
-      print('❌ [NOTIF] Error getting pending notifications: $e');
     }
   }
 
-  // Method to manually dismiss a persistent notification (for testing)
-  Future<void> dismissPersistentNotification(int notificationId) async {
-    if (_activeCalendarNotificationIds.contains(notificationId)) {
-      await _notifications.cancel(notificationId);
-      _activeCalendarNotificationIds.remove(notificationId);
-      print('✅ [NOTIF] Manually dismissed persistent notification $notificationId');
-    } else {
-      print('❌ [NOTIF] Notification $notificationId is not in active persistent list');
-    }
+  Future<void> onCalendarSynced() async => scheduleInterviewNotifications();
+  Future<void> cancelAllNotifications() async {
+    await _notif.cancelAll();
+    _scheduledInterviews.clear();
+    _activeCalendarIds.clear();
   }
 
-  // Get statistics
-  Map<String, dynamic> getNotificationStats() {
-    return {
-      'isInitialized': _isInitialized,
-      'scheduledInterviews': _scheduledInterviews.length,
-      'activePersistentNotifications': _activeCalendarNotificationIds.length,
-      'persistentIds': _activeCalendarNotificationIds.toList(),
-    };
-  }
+  Map<String, dynamic> getNotificationStats() => {
+    'isInitialized': _isInitialized,
+    'scheduledInterviews': _scheduledInterviews.length,
+    'activeCalendarNotifications': _activeCalendarIds.length,
+  };
 }

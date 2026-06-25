@@ -1,1320 +1,709 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'main.dart';
-import 'main_menu_screen.dart';
-import 'about_screen.dart';
-import 'upgrade_premium_screen.dart';
-import 'setup_screen.dart';
-import 'resources_screen.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:interviewai/cloud_function_service.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'dart:convert';
+import 'app_theme.dart';
+import 'app_config.dart';
 import 'calendar_service.dart';
-import 'calendar_widget.dart';
-import 'notification_service.dart';
+import 'progress_service.dart';
+import 'drill_session_screen.dart';
 
 class AiCoachScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  
-  const AiCoachScreen({Key? key, required this.cameras}) : super(key: key);
-
+  const AiCoachScreen({super.key, required this.cameras});
   @override
   State<AiCoachScreen> createState() => _AiCoachScreenState();
 }
 
-class ChatMessage {
-  final String text;
-  final bool isUser;
-  final DateTime timestamp;
-
-  ChatMessage({
-    required this.text,
-    required this.isUser,
-    required this.timestamp,
-  });
-}
-
 class _AiCoachScreenState extends State<AiCoachScreen>
-    with TickerProviderStateMixin, WidgetsBindingObserver {
-  final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  final List<ChatMessage> _messages = [];
-  bool _isTyping = false;
-  late AnimationController _typingController;
-  
-  // Gemini API configuration
-  static const String apiKey = 'AIzaSyBcK5CDUQhMY94FJEgGja6UiT4pKAcdWZw';//'AIzaSyBG9Ibtg3a0UTO5DZb4mfhmN7mtij_OMPU';
-  static const String baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-  
-  // Chat history for context
-  final List<Map<String, dynamic>> _chatHistory = [];
+    with TickerProviderStateMixin {
 
-  // Calendar integration - Add local state tracking
-  final GoogleCalendarService _calendarService = GoogleCalendarService();
-  final NotificationService _notificationService = NotificationService();
-  List<CalendarEvent> _upcomingInterviews = [];
-  bool _isCalendarLoading = false;
-  bool _isCalendarConnected = false; // ADD THIS: Local state tracking
+  final _inputCtrl  = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  final List<_Msg>  _messages = [];
 
-  // Sample interview questions for quick start
-  final List<String> _quickQuestions = [
-    "Tell me about yourself",
-    "What are your greatest strengths?",
-    "Why do you want this job?",
-    "Where do you see yourself in 5 years?",
-    "What's your biggest weakness?",
-    "Why are you leaving your current job?",
-  ];
+  // State
+  bool _thinking    = false;
+  bool _loadingCtx  = true;
+  bool _voiceMode   = false;
+  bool _listening   = false;
+  bool _ttsPlaying  = false;
+  bool _voiceReady  = false;
+
+  // Voice
+  final FlutterTts        _tts    = FlutterTts();
+  final stt.SpeechToText  _speech = stt.SpeechToText();
+
+  // Context
+  List<CalendarEvent>     _upcomingInterviews = [];
+  Map<String, dynamic>?   _progressStats;
+  String                  _userName = '';
+
+  // Pulse animation for mic
+  late AnimationController _micPulse = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 800))
+    ..repeat(reverse: true);
+
+  static const _kModel = 'claude-haiku-4-5-20251001';
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _typingController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    _addWelcomeMessage();
-    _addSystemMessage();
-    _initializeServices();
+    _initVoice();
+    _loadContext();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _messageController.dispose();
-    _scrollController.dispose();
-    _typingController.dispose();
+    _inputCtrl.dispose();
+    _scrollCtrl.dispose();
+    _micPulse.dispose();
+    _tts.stop();
+    _speech.stop();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    
-    if (state == AppLifecycleState.resumed) {
-      // App came back to foreground, refresh calendar data
-      _refreshCalendarData();
-    }
-  }
+  // - Voice init -
 
-  // Initialize all services
-  Future<void> _initializeServices() async {
-    // Initialize notifications first
-    await _initializeNotifications();
-    
-    // Initialize calendar service
-    await _initializeCalendarService();
-  }
-
-  Future<void> _initializeNotifications() async {
-    try {
-      await _notificationService.initialize();
-    } catch (error) {
-      print('Error initializing notifications: $error');
-    }
-  }
-
-  Future<void> _initializeCalendarService() async {
-    if (mounted) {
-      setState(() {
-        _isCalendarLoading = true;
-      });
-    }
-
-    try {
-      print('Initializing calendar service...');
-      
-      // Initialize the calendar service (this will auto-sign in if previously signed in)
-      final bool wasSignedIn = await _calendarService.initialize();
-      
-      // UPDATE: Always update local state after initialization
-      if (mounted) {
-        setState(() {
-          _isCalendarConnected = _calendarService.isSignedIn;
-        });
-      }
-      
-      if (wasSignedIn) {
-        print('Calendar service: User was already signed in, loading data...');
-        await _loadCalendarData();
-      } else {
-        print('Calendar service: No previous sign-in found');
-        _showCalendarSignInOption();
-      }
-    } catch (error) {
-      print('Error initializing calendar service: $error');
-      // UPDATE: Ensure state is updated even on error
-      if (mounted) {
-        setState(() {
-          _isCalendarConnected = false;
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCalendarLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _loadCalendarData() async {
-    try {
-      // Ensure connection before loading data
-      if (await _calendarService.ensureConnection()) {
-        final interviews = await _calendarService.getInterviewEvents();
-        if (mounted) {
-          setState(() {
-            _upcomingInterviews = interviews;
-            _isCalendarConnected = _calendarService.isSignedIn; // UPDATE: Sync state
-          });
-        }
-        
-        if (interviews.isNotEmpty) {
-          _updateAIContextWithCalendar();
-          // Update notifications when calendar data loads
-          await _notificationService.scheduleInterviewNotifications();
-        }
-        
-        print('Calendar data loaded: ${interviews.length} interview events found');
-      } else {
-        print('Could not establish calendar connection');
-        // UPDATE: Update connection state if connection failed
-        if (mounted) {
-          setState(() {
-            _isCalendarConnected = false;
-          });
-        }
-      }
-    } catch (error) {
-      print('Error loading calendar data: $error');
-      // Handle the error gracefully - app should still work without calendar
-      if (mounted) {
-        setState(() {
-          _isCalendarConnected = false;
-        });
-      }
-    }
-  }
-
-  void _showCalendarSignInOption() {
-    print('Calendar connection available - user can sign in for interview reminders');
-  }
-
-  Future<void> _connectCalendar() async {
-    if (mounted) {
-      setState(() {
-        _isCalendarLoading = true;
-      });
-    }
-
-    try {
-      final bool success = await _calendarService.signIn();
-      if (success) {
-        // UPDATE: Update local state immediately after successful sign-in
-        if (mounted) {
-          setState(() {
-            _isCalendarConnected = true;
-          });
-        }
-        
-        await _loadCalendarData();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Calendar connected successfully!'),
-              backgroundColor: BauhausColors.blue,
-            ),
-          );
-        }
-      } else {
-        // UPDATE: Update state on sign-in failure
-        if (mounted) {
-          setState(() {
-            _isCalendarConnected = false;
-          });
-        }
-      }
-    } catch (error) {
-      print('Error connecting calendar: $error');
-      if (mounted) {
-        setState(() {
-          _isCalendarConnected = false; // UPDATE: Update state on error
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to connect calendar'),
-            backgroundColor: BauhausColors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCalendarLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _disconnectCalendar() async {
-    try {
-      await _calendarService.signOut();
-      if (mounted) {
-        setState(() {
-          _upcomingInterviews = [];
-          _isCalendarConnected = false; // UPDATE: Update local state
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Calendar disconnected'),
-            backgroundColor: BauhausColors.gray,
-          ),
-        );
-      }
-    } catch (error) {
-      print('Error disconnecting calendar: $error');
-    }
-  }
-
-  Future<void> _refreshCalendarData() async {
-    // UPDATE: Check local state first, then service state
-    if (_isCalendarConnected && _calendarService.isSignedIn) {
-      try {
-        // Ensure connection is still valid
-        if (await _calendarService.ensureConnection()) {
-          await _loadCalendarData();
-        } else {
-          print('Calendar connection lost, reinitializing...');
-          await _initializeCalendarService();
-        }
-      } catch (error) {
-        print('Error refreshing calendar data: $error');
-        // UPDATE: Update state on refresh error
-        if (mounted) {
-          setState(() {
-            _isCalendarConnected = false;
-          });
-        }
-      }
-    }
-  }
-
-  void _updateAIContextWithCalendar() {
-    if (_upcomingInterviews.isNotEmpty && _isCalendarConnected) {
-      final nextInterview = _upcomingInterviews.first;
-      final contextMessage = "User has an upcoming interview: '${nextInterview.title}' on ${_formatEventTime(nextInterview)}. ${nextInterview.description.isNotEmpty ? 'Description: ${nextInterview.description}' : ''} Provide relevant preparation advice.";
-      
-      print('Calendar context: $contextMessage');
-    }
-  }
-
-  void _addSystemMessage() {
-    // Add system instructions to chat history
-    _chatHistory.add({
-      "role": "user",
-      "parts": [{
-        "text": """You are ITSAGO, an AI Interview Coach chatbot.
-
-Keep responses medium length - 2-3 sentences with helpful details. Be chatbot-friendly but informative.
-
-Rules:
-- 2-3 sentences maximum
-- Give practical, actionable advice
-- Include key tips or examples when helpful
-- Be conversational and encouraging
-- Focus on one main point with brief explanation
-
-Respond like a helpful chatbot that gives solid interview advice without being too wordy."""
-      }]
+  Future<void> _initVoice() async {
+    await _tts.setLanguage('en-ZA');
+    await _tts.setSpeechRate(0.48);
+    await _tts.setVolume(1.0);
+    _tts.setCompletionHandler(() {
+      if (mounted) setState(() => _ttsPlaying = false);
     });
-    
-    _chatHistory.add({
-      "role": "model",
-      "parts": [{
-        "text": "Hi! I'm ITSAGO, your AI Interview Coach. I'll help you with practical interview tips and advice. What would you like to practice today?"
-      }]
-    });
+    _voiceReady = await _speech.initialize(
+      onStatus: (s) {
+        if (s == 'done' || s == 'notListening') {
+          if (mounted) setState(() => _listening = false);
+        }
+      },
+      onError: (_) {
+        if (mounted) setState(() => _listening = false);
+      });
+    if (mounted) setState(() {});
   }
 
-  void _addWelcomeMessage() {
+  Future<void> _speak(String text) async {
+    if (!_voiceMode) return;
+    setState(() => _ttsPlaying = true);
+    await _tts.speak(text);
+  }
+
+  Future<void> _toggleListen() async {
+    if (!_voiceReady) return;
+    if (_listening) {
+      await _speech.stop();
+      setState(() => _listening = false);
+      return;
+    }
+    setState(() => _listening = true);
+    await _speech.listen(
+      onResult: (r) {
+        if (r.finalResult && r.recognizedWords.isNotEmpty) {
+          setState(() => _listening = false);
+          _sendText(r.recognizedWords);
+        }
+      },
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 3),
+      localeId: 'en_ZA');
+  }
+
+  void _stopTTS() {
+    _tts.stop();
+    setState(() => _ttsPlaying = false);
+  }
+
+  // - Load context -
+
+  Future<void> _loadContext() async {
+    setState(() => _loadingCtx = true);
+    final user = FirebaseAuth.instance.currentUser;
+    _userName = user?.displayName?.split(' ').first ?? '';
+    final results = await Future.wait([
+      _loadCalendar(), ProgressService.getStats()]);
+    _upcomingInterviews = results[0] as List<CalendarEvent>;
+    _progressStats      = results[1] as Map<String, dynamic>?;
+    if (mounted) {
+      setState(() => _loadingCtx = false);
+      _addGreeting();
+    }
+  }
+
+  Future<List<CalendarEvent>> _loadCalendar() async {
+    try {
+      final svc = GoogleCalendarService();
+      await svc.initialize();
+      if (!svc.isSignedIn) return [];
+      return await svc.getInterviewEvents();
+    } catch (_) { return []; }
+  }
+
+  void _addGreeting() {
+    final name     = _userName.isNotEmpty ? ', $_userName' : '';
+    final total    = _progressStats?['total'] as int? ?? 0;
+    final avgConf  = (_progressStats?['avgConf'] as double? ?? 0).round();
+    final hasCalendar = _upcomingInterviews.isNotEmpty;
+
+    String greeting;
+    if (hasCalendar) {
+      final next  = _upcomingInterviews.first;
+      final days  = next.startTime.difference(DateTime.now()).inDays;
+      final when  = days == 0 ? 'TODAY' : days == 1 ? 'TOMORROW' : 'in $days days';
+      greeting =
+        'Hi$name! I can see you have an interview $when - ${next.title}.\n\n'
+        'I have loaded your calendar and performance data. '
+        'Tap PREP NOW on the banner above, or start a Drill Session '
+        'to practise targeted questions. What would you like to do?';
+    } else if (total > 0) {
+      greeting =
+        'Hi$name! I have loaded your performance data - '
+        '$total session${total == 1 ? "" : "s"}, '
+        'average confidence $avgConf%.\n\n'
+        '${avgConf < 60
+          ? "There is room to build that confidence. Try a Drill Session."
+          : avgConf < 75
+          ? "Good progress. Let\'s push further - try a targeted drill."
+          : "Strong numbers. Let\'s keep the momentum going."}\n\n'
+        'What would you like to work on?';
+    } else {
+      greeting =
+        'Hi$name! I am your ITSAGO AI Coach.\n\n'
+        'I am here to help you prepare for interviews, practise answers, '
+        'and build your confidence.\n\n'
+        'You can chat with me, run a structured Drill Session, '
+        'or use voice mode to practise speaking out loud. '
+        'What would you like to do?';
+    }
+    setState(() => _messages.add(_Msg(role: 'assistant', text: greeting)));
+  }
+
+  String _systemPrompt() {
+    final sb = StringBuffer();
+    sb.writeln(
+      'You are ITSAGO AI, a career and interview preparation assistant for South African job seekers. Be concise, practical and direct. Use South African context where relevant.\n'
+      'IDENTITY RULE: You are ITSAGO AI. If anyone asks what AI you are, what model powers you, who made you, or what technology you use, always say: I am ITSAGO AI, your personal career coach. Never mention Claude, Anthropic, Gemini, Google or any other company or model.\n'
+      'SCOPE RULE: Only answer questions about interviews, careers, CVs, job applications, salary negotiation, workplace skills and professional development. For anything else respond: I am only able to help with career and interview preparation. Try asking me about interviews, CVs or job applications!');
+    if (_userName.isNotEmpty) sb.writeln('\nUser: $_userName');
+    final stats = _progressStats;
+    if (stats != null && (stats['total'] as int) > 0) {
+      final avg  = (stats['avgConf']    as double).round();
+      final best = (stats['best']       as double).round();
+      final fill = (stats['avgFillers'] as double).toStringAsFixed(1);
+      sb.writeln('\n=== PERFORMANCE DATA ===');
+      sb.writeln('Sessions: ${stats["total"]}  Avg: $avg%  Best: $best%  Fillers: $fill/session');
+      for (final s in (stats['sessions'] as List? ?? []).take(3)) {
+        sb.writeln('  ${s["company"]} | ${s["jobTitle"]} | ${(s["overallConfidence"] as num).round()}%');
+      }
+    }
+    if (_upcomingInterviews.isNotEmpty) {
+      sb.writeln('\n=== UPCOMING INTERVIEWS ===');
+      for (final e in _upcomingInterviews.take(3)) {
+        final d = e.startTime.difference(DateTime.now()).inDays;
+        sb.writeln('${e.title} - in $d day${d == 1 ? "" : "s"}');
+      }
+    }
+    if (_voiceMode) {
+      sb.writeln('\nUSER IS IN VOICE MODE - keep replies under 3 sentences. '
+        'Be conversational, no bullet lists, no markdown.');
+    }
+    return sb.toString();
+  }
+
+  // - Send -
+
+  Future<void> _send() async {
+    final text = _inputCtrl.text.trim();
+    if (text.isEmpty || _thinking) return;
+    _inputCtrl.clear();
+    _sendText(text);
+  }
+
+  Future<void> _sendText(String text) async {
+    if (_thinking) return;
+    if (_ttsPlaying) _stopTTS();
     setState(() {
-      _messages.add(ChatMessage(
-        text: "Hi! I'm ITSAGO, your AI Interview Coach. I'll help you prepare with practical tips and advice. What interview topic would you like to work on?",
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(_Msg(role: 'user', text: text));
+      _thinking = true;
     });
+    _scrollDown();
+    try {
+      // Claude API requires history to start with user role.
+      // The local greeting is assistant-generated and must be excluded.
+      // Also trim to last 20 messages to avoid token limits.
+      final allMsgs = _messages
+        .map((m) => {'role': m.role, 'content': m.text})
+        .toList();
+      final firstUser = allMsgs.indexWhere((m) => m['role'] == 'user');
+      final trimmed   = firstUser >= 0 ? allMsgs.sublist(firstUser) : allMsgs;
+      final history   = trimmed.length > 20
+        ? trimmed.sublist(trimmed.length - 20)
+        : trimmed;
+      final res = await CloudFunctionService.callClaude(
+        
+          model: 'claude-haiku-4-5-20251001',
+          maxTokens: _voiceMode ? 200 : 600,
+          system: _systemPrompt(),
+          messages: history,
+        );
+      
+        final raw = CloudFunctionService.extractText(res);
+        final reply = raw.replaceAll(RegExp(r'\*\*'), '').replaceAll(RegExp(r'\*'), '').replaceAll(RegExp(r'#{1,6} '), '').trim();
+        if (mounted) {
+          setState(() {
+            _messages.add(_Msg(role: 'assistant', text: reply));
+            _thinking = false;
+          });
+          if (_voiceMode) await _speak(reply);
+        }
+    } catch (_) {
+      if (mounted) setState(() {
+        _messages.add(_Msg(role: 'assistant',
+          text: 'Sorry - connection issue. Please try again.'));
+        _thinking = false;
+      });
+    }
+    _scrollDown();
   }
+
+  void _scrollDown() => Future.delayed(const Duration(milliseconds: 120), () {
+    if (_scrollCtrl.hasClients) _scrollCtrl.animateTo(
+      _scrollCtrl.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+  });
+
+  // - Context-aware quick prompts -
+
+  List<Map<String, dynamic>> get _contextPrompts {
+    final list = <Map<String, dynamic>>[];
+    if (_upcomingInterviews.isNotEmpty) {
+      final next = _upcomingInterviews.first;
+      final days = next.startTime.difference(DateTime.now()).inDays;
+      list.add({
+        'label':  days == 0 ? 'Prep Today' : days == 1 ? 'Prep Tomorrow' : 'Prep Interview',
+        'prompt': 'I have an interview for ${next.title} '
+          '${days == 0 ? "today" : days == 1 ? "tomorrow" : "in $days days"}. '
+          'Give me the top 5 questions and a prep plan.',
+        'icon': Icons.event_rounded, 'color': AppColors.red,
+      });
+    }
+    final avg = _progressStats?['avgConf'] as double? ?? 0;
+    if (avg > 0 && avg < 65) {
+      list.add({
+        'label':  'Confidence',
+        'prompt': 'My average confidence is ${avg.round()}%. '
+          'Give me a 5-minute confidence building drill.',
+        'icon': Icons.psychology_rounded, 'color': AppColors.amber,
+      });
+    }
+    list.addAll([
+      {'label': 'STAR Method',  'prompt': 'Teach me STAR with 2 worked examples.',
+       'icon': Icons.star_rounded, 'color': AppColors.amber},
+      {'label': 'Mock Q&A',     'prompt': 'Ask me 3 interview questions and give feedback on my answers.',
+       'icon': Icons.mic_rounded, 'color': AppColors.red},
+      {'label': 'Salary Nego',  'prompt': 'How do I negotiate salary in South Africa without losing the offer?',
+       'icon': Icons.attach_money_rounded, 'color': AppColors.blue},
+      {'label': 'Weakness Q',   'prompt': 'How do I answer "What is your greatest weakness?" impressively?',
+       'icon': Icons.shield_rounded, 'color': AppColors.ink},
+      {'label': 'Body Language','prompt': 'Give me 5 video interview body language tips.',
+       'icon': Icons.accessibility_new_rounded, 'color': AppColors.blue},
+    ]);
+    return list.take(6).toList();
+  }
+
+  // - Build -
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: BauhausColors.lightGray,
-      drawer: _buildBauhausDrawer(),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            Container(
-              width: double.infinity,
-              height: 100,
-              color: BauhausColors.yellow,
-              child: Stack(
-                children: [
-                  // Geometric elements
-                  Positioned(
-                    top: -15,
-                    right: -15,
-                    child: Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        color: BauhausColors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 8,
-                    left: 30,
-                    child: Container(
-                      width: 25,
-                      height: 12,
-                      color: BauhausColors.blue,
-                    ),
-                  ),
-                  // Back button
-                  Positioned(
-                    top: 15,
-                    left: 15,
-                    child: GestureDetector(
-                      onTap: () => Navigator.of(context).pop(),
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: BauhausColors.white,
-                          border: Border.all(
-                            color: BauhausColors.black,
-                            width: 2,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.arrow_back,
-                          color: BauhausColors.black,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Menu button
-                  Positioned(
-                    top: 15,
-                    right: 15,
-                    child: Builder(
-                      builder: (context) => GestureDetector(
-                        onTap: () => Scaffold.of(context).openDrawer(),
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: BauhausColors.white,
-                            border: Border.all(
-                              color: BauhausColors.black,
-                              width: 2,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.menu,
-                            color: BauhausColors.black,
-                            size: 20,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Title
-                  Center(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.psychology,
-                          color: BauhausColors.black,
-                          size: 24,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'AI COACH',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            color: BauhausColors.black,
-                            letterSpacing: 3,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // Main content area - Expandable
-            Expanded(
-              child: _messages.length <= 1 
-                  ? SingleChildScrollView(
-                      padding: const EdgeInsets.all(15),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Calendar Events Section - TOP
-                          _buildCalendarEventsSection(),
-                          
-                          const SizedBox(height: 20),
-                          
-                          // Quick Questions Section - MIDDLE
-                          Text(
-                            'QUICK START',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w900,
-                              color: BauhausColors.black,
-                              letterSpacing: 2,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _quickQuestions.map((question) {
-                              return GestureDetector(
-                                onTap: () => _sendMessage(question),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: BauhausColors.white,
-                                    border: Border.all(
-                                      color: BauhausColors.black,
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    question,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: BauhausColors.black,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          
-                          // Welcome message - BOTTOM
-                          if (_messages.isNotEmpty) 
-                            _buildMessageBubble(_messages.first),
-                          
-                          // Add some bottom padding for better scrolling
-                          const SizedBox(height: 100),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.symmetric(horizontal: 15),
-                      itemCount: _messages.length + (_isTyping ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        if (index == _messages.length && _isTyping) {
-                          return _buildTypingIndicator();
-                        }
-                        return _buildMessageBubble(_messages[index]);
-                      },
-                    ),
-            ),
-            
-            // Input area - Fixed at bottom
-            Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: BauhausColors.white,
-                border: Border(
-                  top: BorderSide(color: BauhausColors.black, width: 2),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: BauhausColors.black, width: 2),
-                      ),
-                      child: TextField(
-                        controller: _messageController,
-                        decoration: InputDecoration(
-                          hintText: 'Ask any interview question...',
-                          hintStyle: TextStyle(
-                            color: BauhausColors.gray,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          contentPadding: const EdgeInsets.all(12),
-                          border: InputBorder.none,
-                          filled: true,
-                          fillColor: BauhausColors.white,
-                        ),
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: BauhausColors.black,
-                        ),
-                        maxLines: null,
-                        onSubmitted: (text) {
-                          if (text.trim().isNotEmpty) {
-                            _sendMessage(text.trim());
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Container(
-                    width: 50,
-                    height: 50,
-                    color: BauhausColors.blue,
-                    child: MaterialButton(
-                      onPressed: _isTyping ? null : () {
-                        final text = _messageController.text.trim();
-                        if (text.isNotEmpty) {
-                          _sendMessage(text);
-                        }
-                      },
-                      child: Icon(
-                        Icons.send,
-                        color: BauhausColors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+      backgroundColor: AppColors.cream,
+      body: SafeArea(child: Column(children: [
 
-  // Calendar events section - UPDATE: Use local state
-  Widget _buildCalendarEventsSection() {
-    return CalendarEventsWidget(
-      events: _upcomingInterviews,
-      isLoading: _isCalendarLoading,
-      isConnected: _isCalendarConnected, // CHANGED: Use local state instead of service state
-      onEventTap: (event) {
-        // When user taps on an interview event, auto-generate coaching
-        if (event.isInterview) {
-          final message = "Help me prepare for my upcoming interview: ${event.title} scheduled for ${_formatEventTime(event)}. ${event.description.isNotEmpty ? 'Description: ${event.description}' : ''}";
-          _sendMessage(message);
-        }
-      },
-      onConnectTap: _connectCalendar,
-      onRefreshTap: _refreshCalendarData,
-    );
-  }
+        AppWidgets.header(
+          title:       'AI COACH',
+          context:     context,
+          leading:     AppWidgets.backButton(context),
+          accentColor: AppColors.amber),
 
-  // ... rest of the methods remain the same ...
-  
-  Widget _buildMessageBubble(ChatMessage message) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 15),
-      child: Row(
-        mainAxisAlignment: message.isUser 
-            ? MainAxisAlignment.end 
-            : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (!message.isUser) ...[
-            Container(
-              width: 35,
-              height: 35,
-              decoration: BoxDecoration(
-                color: BauhausColors.yellow,
-                border: Border.all(color: BauhausColors.black, width: 2),
-              ),
-              child: Icon(
-                Icons.psychology,
-                color: BauhausColors.black,
-                size: 18,
-              ),
-            ),
-            const SizedBox(width: 10),
-          ],
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: message.isUser 
-                    ? BauhausColors.blue 
-                    : BauhausColors.white,
-                border: Border.all(color: BauhausColors.black, width: 2),
-              ),
-              child: Text(
-                message.text,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: message.isUser 
-                      ? BauhausColors.white 
-                      : BauhausColors.black,
-                  height: 1.3,
-                ),
-              ),
-            ),
-          ),
-          if (message.isUser) ...[
-            const SizedBox(width: 10),
-            Container(
-              width: 35,
-              height: 35,
-              decoration: BoxDecoration(
-                color: BauhausColors.red,
-                border: Border.all(color: BauhausColors.black, width: 2),
-              ),
-              child: Icon(
-                Icons.person,
-                color: BauhausColors.white,
-                size: 18,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
+        // Interview banner
+        if (_upcomingInterviews.isNotEmpty)
+          _interviewBanner(_upcomingInterviews.first),
 
-  Widget _buildTypingIndicator() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 15),
-      child: Row(
-        children: [
+        // Context loading
+        if (_loadingCtx)
           Container(
-            width: 35,
-            height: 35,
-            decoration: BoxDecoration(
-              color: BauhausColors.yellow,
-              border: Border.all(color: BauhausColors.black, width: 2),
-            ),
-            child: Icon(
-              Icons.psychology,
-              color: BauhausColors.black,
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: BauhausColors.white,
-              border: Border.all(color: BauhausColors.black, width: 2),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'AI Coach is thinking',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: BauhausColors.gray,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: BauhausColors.blue,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+            color: AppColors.blue.withOpacity(0.06),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(children: [
+              const SizedBox(width: 12, height: 12,
+                child: CircularProgressIndicator(
+                  color: AppColors.blue, strokeWidth: 2)),
+              const SizedBox(width: 10),
+              Text('Loading your performance data...',
+                style: AppText.caption.copyWith(color: AppColors.blue)),
+            ])),
+
+        // Toolbar: voice mode + drill mode
+        _toolbar(),
+
+        // Quick prompts
+        Container(
+          color: AppColors.white, height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            children: _contextPrompts.map((p) => GestureDetector(
+              onTap: () {
+                _inputCtrl.text = p['prompt'] as String;
+                _send();
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: (p['color'] as Color).withOpacity(0.08),
+                  border: Border.all(
+                    color: (p['color'] as Color).withOpacity(0.3), width: 1.5)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(p['icon'] as IconData,
+                    size: 12, color: p['color'] as Color),
+                  const SizedBox(width: 5),
+                  Text((p['label'] as String).toUpperCase(),
+                    style: AppText.label.copyWith(
+                      color: p['color'] as Color, fontSize: 8)),
+                ])))).toList())),
+
+        AppWidgets.divider(),
+
+        // Messages
+        Expanded(child: ListView.builder(
+          controller: _scrollCtrl,
+          padding: const EdgeInsets.all(14),
+          itemCount: _messages.length + (_thinking ? 1 : 0),
+          itemBuilder: (_, i) {
+            if (i == _messages.length) return _thinkingBubble();
+            return _bubble(_messages[i]);
+          })),
+
+        AppWidgets.divider(),
+
+        // Context strip
+        if (!_loadingCtx && (_progressStats?['total'] as int? ?? 0) > 0)
+          _contextStrip(),
+
+        // Input area
+        _voiceMode ? _voiceInput() : _textInput(),
+
+      ])));
   }
 
-  void _sendMessage(String text) {
-    setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: true,
-        timestamp: DateTime.now(),
-      ));
-      _isTyping = true;
-    });
-    
-    _messageController.clear();
-    _scrollToBottom();
-    
-    // Generate AI response using direct HTTP API
-    _generateGeminiResponse(text);
-  }
+  // - Toolbar -
 
-  Future<void> _generateGeminiResponse(String userMessage) async {
-    try {
-      // Add user message to chat history
-      _chatHistory.add({
-        "role": "user",
-        "parts": [{"text": userMessage}]
-      });
+  Widget _toolbar() => Container(
+    color: AppColors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: Row(children: [
 
-      // Include calendar context if available
-      String contextualMessage = userMessage;
-      if (_upcomingInterviews.isNotEmpty) {
-        final nextInterview = _upcomingInterviews.first;
-        contextualMessage += "\n\nContext: User has an upcoming interview - '${nextInterview.title}' on ${_formatEventTime(nextInterview)}.";
-      }
+      // Voice mode toggle
+      GestureDetector(
+        onTap: () => setState(() { _voiceMode = !_voiceMode; if (!_voiceMode) { _speech.stop(); _tts.stop(); }}),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _voiceMode ? AppColors.red : Colors.transparent,
+            border: Border.all(
+              color: _voiceMode ? AppColors.red : AppColors.mist,
+              width: 1.5)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.mic_rounded,
+              size: 13,
+              color: _voiceMode ? Colors.white : AppColors.dim),
+            const SizedBox(width: 6),
+            Text('VOICE${_voiceMode ? " ON" : ""}',
+              style: AppText.label.copyWith(
+                fontSize: 8,
+                color: _voiceMode ? Colors.white : AppColors.dim)),
+          ]))),
 
-      final response = await http.post(
-        Uri.parse('$baseUrl?key=$apiKey'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          "contents": [
-            ..._chatHistory,
-            {
-              "role": "user",
-              "parts": [{"text": contextualMessage + "\n\nGive me 2-3 sentences with helpful details. Be chatbot-friendly but informative."}]
-            }
-          ],
-          "generationConfig": {
-            "temperature": 0.7,
-            "topK": 40,
-            "topP": 0.95,
-            "maxOutputTokens": 120,
-            "stopSequences": ["\n\n"],
-          },
-          "safetySettings": [
-            {
-              "category": "HARM_CATEGORY_HARASSMENT",
-              "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              "category": "HARM_CATEGORY_HATE_SPEECH",
-              "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-              "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-              "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            }
-          ]
-        }),
-      );
+      const SizedBox(width: 8),
 
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
-        
-        if (responseData['candidates'] != null && 
-            responseData['candidates'].isNotEmpty &&
-            responseData['candidates'][0]['content'] != null &&
-            responseData['candidates'][0]['content']['parts'] != null &&
-            responseData['candidates'][0]['content']['parts'].isNotEmpty) {
-          
-          String aiResponse = responseData['candidates'][0]['content']['parts'][0]['text'];
-          
-          // Trim response to ensure it's concise
-          aiResponse = _trimResponse(aiResponse);
-          
-          // Add AI response to chat history
-          _chatHistory.add({
-            "role": "model",
-            "parts": [{"text": aiResponse}]
-          });
-
-          setState(() {
-            _isTyping = false;
-            _messages.add(ChatMessage(
-              text: aiResponse,
-              isUser: false,
-              timestamp: DateTime.now(),
-            ));
-          });
-        } else {
-          _handleAIError('Sorry, I couldn\'t generate a response. Could you try rephrasing your question?');
-        }
-      } else {
-        print('API Error: ${response.statusCode} - ${response.body}');
-        _handleAIError('I\'m having trouble connecting right now. Please check your connection and try again.');
-      }
-    } catch (e) {
-      print('Error generating AI response: $e');
-      _handleAIError('Network connection issue. Please check your internet and try again.');
-    }
-    
-    _scrollToBottom();
-  }
-
-  String _trimResponse(String response) {
-    response = response.trim().replaceAll(RegExp(r'\n+'), ' ');
-    
-    List<String> sentences = response.split(RegExp(r'[.!?]+'));
-    sentences = sentences.where((s) => s.trim().isNotEmpty).toList();
-    
-    if (sentences.length <= 3) {
-      return response.trim();
-    }
-    
-    String trimmed = sentences.take(3).join('. ').trim();
-    
-    if (!trimmed.endsWith('.') && !trimmed.endsWith('!') && !trimmed.endsWith('?')) {
-      trimmed += '.';
-    }
-    
-    return trimmed;
-  }
-
-  void _handleAIError(String errorMessage) {
-    setState(() {
-      _isTyping = false;
-      _messages.add(ChatMessage(
-        text: errorMessage,
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
-    });
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  // Helper methods for calendar integration
-  String _formatEventTime(CalendarEvent event) {
-    final now = DateTime.now();
-    final eventDate = event.startTime;
-    
-    if (eventDate.year == now.year && eventDate.month == now.month && eventDate.day == now.day) {
-      return 'Today ${_formatTime(eventDate)}';
-    } else if (eventDate.difference(now).inDays == 1) {
-      return 'Tomorrow ${_formatTime(eventDate)}';
-    } else if (eventDate.difference(now).inDays < 7) {
-      return '${_getDayName(eventDate.weekday)} ${_formatTime(eventDate)}';
-    } else {
-      return '${eventDate.day}/${eventDate.month} ${_formatTime(eventDate)}';
-    }
-  }
-
-  String _formatTime(DateTime dateTime) {
-    final hour = dateTime.hour;
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    final amPm = hour >= 12 ? 'PM' : 'AM';
-    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-    return '$displayHour:$minute $amPm';
-  }
-
-  String _getDayName(int weekday) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days[weekday - 1];
-  }
-
-  Widget _buildBauhausDrawer() {
-    return Drawer(
-      backgroundColor: BauhausColors.white,
-      child: Column(
-        children: [
-          // Drawer Header
-          Container(
-            width: double.infinity,
-            height: 200,
-            color: BauhausColors.blue,
-            child: Stack(
-              children: [
-                // Geometric elements
-                Positioned(
-                  top: -30,
-                  right: -30,
-                  child: Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: BauhausColors.yellow,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 10,
-                  left: 10,
-                  child: Container(
-                    width: 60,
-                    height: 30,
-                    color: BauhausColors.red,
-                  ),
-                ),
-                
-                // Header content
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: BauhausColors.white,
-                          border: Border.all(
-                            color: BauhausColors.black,
-                            width: 3,
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            'I',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w900,
-                              color: BauhausColors.black,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 15),
-                      Text(
-                        'ITSAGO',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          color: BauhausColors.white,
-                          letterSpacing: 3,
-                        ),
-                      ),
-                      Text(
-                        'AI INTERVIEW PREP',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: BauhausColors.yellow,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // Menu Items
-          Expanded(
-            child: Column(
-              children: [
-                const SizedBox(height: 20),
-                
-                // Main Menu item
-                _buildDrawerItem(
-                  icon: Icons.home,
-                  title: 'MAIN MENU',
-                  subtitle: 'Return to home screen',
-                  color: BauhausColors.yellow,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).pushReplacement(
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            MainMenuScreen(cameras: widget.cameras),
-                        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                          return SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(-1.0, 0.0),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOut,
-                            )),
-                            child: child,
-                          );
-                        },
-                        transitionDuration: const Duration(milliseconds: 600),
-                      ),
-                    );
-                  },
-                ),
-                
-                const SizedBox(height: 15),
-                
-                // Practice Interview menu item
-                _buildDrawerItem(
-                  icon: Icons.video_camera_front,
-                  title: 'PRACTICE INTERVIEW',
-                  subtitle: 'Start your interview prep',
-                  color: BauhausColors.red,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            SetupScreen(cameras: widget.cameras),
-                        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                          return SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(1.0, 0.0),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOut,
-                            )),
-                            child: child,
-                          );
-                        },
-                        transitionDuration: const Duration(milliseconds: 600),
-                      ),
-                    );
-                  },
-                ),
-                
-                const SizedBox(height: 15),
-                
-                // Resources menu item
-                _buildDrawerItem(
-                  icon: Icons.library_books,
-                  title: 'INTERVIEW RESOURCES',
-                  subtitle: 'Guides and study materials',
-                  color: BauhausColors.blue,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            ResourcesScreen(cameras: widget.cameras),
-                        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                          return SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(1.0, 0.0),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOut,
-                            )),
-                            child: child,
-                          );
-                        },
-                        transitionDuration: const Duration(milliseconds: 600),
-                      ),
-                    );
-                  },
-                ),
-                
-                const SizedBox(height: 15),
-                
-                // About menu item
-                _buildDrawerItem(
-                  icon: Icons.info_outline,
-                  title: 'ABOUT',
-                  subtitle: 'Learn more about ISTAGO',
-                  color: BauhausColors.gray,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            AboutScreen(cameras: widget.cameras),
-                        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                          return SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(1.0, 0.0),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOut,
-                            )),
-                            child: child,
-                          );
-                        },
-                        transitionDuration: const Duration(milliseconds: 600),
-                      ),
-                    );
-                  },
-                ),
-                
-                const SizedBox(height: 15),
-                
-                // Upgrade to Premium menu item
-                _buildDrawerItem(
-                  icon: Icons.star_outline,
-                  title: 'UPGRADE TO PREMIUM',
-                  subtitle: 'Unlock advanced features',
-                  color: BauhausColors.red,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            UpgradePremiumScreen(cameras: widget.cameras),
-                        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                          return SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(1.0, 0.0),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOut,
-                            )),
-                            child: child,
-                          );
-                        },
-                        transitionDuration: const Duration(milliseconds: 600),
-                      ),
-                    );
-                  },
-                ),
-                
-                const Spacer(),
-                
-                // Footer
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: BauhausColors.gray,
-                        width: 1,
-                      ),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 3,
-                        color: BauhausColors.red,
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'VERSION 1.0.0',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: BauhausColors.gray,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDrawerItem({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 15),
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: BauhausColors.black,
-          width: 2,
-        ),
-      ),
-      child: Material(
-        color: BauhausColors.white,
-        child: InkWell(
-          onTap: onTap,
+      // TTS stop button (when playing)
+      if (_ttsPlaying)
+        GestureDetector(
+          onTap: _stopTTS,
           child: Container(
-            padding: const EdgeInsets.all(0),
-            child: Row(
-              children: [
-                Container(
-                  width: 70,
-                  height: 70,
-                  color: color,
-                  child: Icon(
-                    icon,
-                    size: 24,
-                    color: color == BauhausColors.yellow 
-                        ? BauhausColors.black 
-                        : BauhausColors.white,
-                  ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 15),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w900,
-                            color: BauhausColors.black,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: BauhausColors.gray,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Container(
-                  width: 30,
-                  height: 70,
-                  color: BauhausColors.lightGray,
-                  child: Icon(
-                    Icons.arrow_forward_ios,
-                    size: 16,
-                    color: BauhausColors.gray,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.amber,
+              border: Border.all(color: AppColors.ink, width: 1.5)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.stop_rounded, size: 13, color: AppColors.ink),
+              const SizedBox(width: 6),
+              Text('STOP', style: AppText.label.copyWith(
+                fontSize: 8, color: AppColors.ink)),
+            ]))),
+
+      const Spacer(),
+
+      // Drill mode button
+      GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+          builder: (_) => DrillSessionScreen(
+            progressStats: _progressStats))),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: const BoxDecoration(
+            color: AppColors.ink, border: AppBorders.ink2,
+            boxShadow: [AppShadows.hard3]),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.fitness_center_rounded,
+              size: 13, color: AppColors.amber),
+            const SizedBox(width: 6),
+            Text('DRILL MODE',
+              style: AppText.label.copyWith(
+                fontSize: 8, color: Colors.white)),
+          ]))),
+    ]));
+
+  // - Voice input -
+
+  Widget _voiceInput() => Container(
+    color: AppColors.white,
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+    child: Column(children: [
+      if (_listening)
+        Padding(padding: const EdgeInsets.only(bottom: 10),
+          child: Text('Listening...',
+            style: AppText.label.copyWith(
+              color: AppColors.red, fontSize: 10))),
+      AnimatedBuilder(animation: _micPulse, builder: (_, __) =>
+        GestureDetector(
+          onTap: _listening ? _toggleListen : _toggleListen,
+          child: Container(
+            width: 72 + (_listening ? _micPulse.value * 8 : 0),
+            height: 72 + (_listening ? _micPulse.value * 8 : 0),
+            decoration: BoxDecoration(
+              color: _listening ? AppColors.red : AppColors.ink,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: _listening
+                  ? AppColors.red.withOpacity(0.3 + _micPulse.value * 0.4)
+                  : AppColors.ink,
+                width: _listening ? 3 + _micPulse.value * 4 : 2),
+              boxShadow: _listening
+                ? [BoxShadow(
+                    color: AppColors.red.withOpacity(0.3 + _micPulse.value * 0.2),
+                    blurRadius: 12 + _micPulse.value * 8,
+                    spreadRadius: 2)]
+                : const [AppShadows.hard4]),
+            child: Icon(
+              _listening ? Icons.stop_rounded : Icons.mic_rounded,
+              color: Colors.white,
+              size: 30)))),
+      const SizedBox(height: 10),
+      Text(
+        _thinking ? 'Coach is thinking...'
+        : _ttsPlaying ? 'Coach is speaking...'
+        : _listening ? 'Tap to stop'
+        : 'Tap to speak',
+        style: AppText.caption.copyWith(color: AppColors.dim)),
+    ]));
+
+  // - Text input -
+
+  Widget _textInput() => Container(
+    color: AppColors.white,
+    padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      Expanded(child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.cream, border: AppBorders.ink2),
+        child: TextField(
+          controller: _inputCtrl,
+          maxLines: 4, minLines: 1,
+          style: AppText.body,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: InputDecoration(
+            hintText: 'Ask your AI coach anything...',
+            hintStyle: AppText.caption,
+            contentPadding: const EdgeInsets.all(12),
+            border: InputBorder.none),
+          onSubmitted: (_) => _send()))),
+      const SizedBox(width: 10),
+      GestureDetector(
+        onTap: _send,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 48, height: 48,
+          decoration: BoxDecoration(
+            color: _thinking ? AppColors.dim : AppColors.ink,
+            border: AppBorders.ink2,
+            boxShadow: _thinking ? null : const [AppShadows.hard3]),
+          child: _thinking
+            ? const Center(child: SizedBox(width: 18, height: 18,
+                child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2)))
+            : const Icon(Icons.send_rounded, color: Colors.white, size: 20))),
+    ]));
+
+  // - Widgets -
+
+  Widget _interviewBanner(CalendarEvent event) {
+    final days = event.startTime.difference(DateTime.now()).inDays;
+    final when = days == 0 ? 'TODAY' : days == 1 ? 'TOMORROW' : 'IN $days DAYS';
+    return Container(
+      width: double.infinity, color: AppColors.red,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(children: [
+        Container(width: 4, height: 32, color: Colors.white),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('INTERVIEW $when',
+            style: AppText.label.copyWith(
+              color: Colors.white, fontSize: 8, letterSpacing: 1.5)),
+          Text(event.title,
+            style: AppText.label.copyWith(color: Colors.white),
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+        ])),
+        GestureDetector(
+          onTap: () {
+            _inputCtrl.text =
+              'I have an interview for ${event.title} $when. '
+              'Give me the top 5 questions and a full prep plan.';
+            _send();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: AppColors.red, width: 1.5)),
+            child: Text('PREP NOW', style: AppText.label.copyWith(
+              color: AppColors.red, fontSize: 8)))),
+      ]));
   }
+
+  Widget _contextStrip() {
+    final total = _progressStats!['total'] as int;
+    final avg   = (_progressStats!['avgConf'] as double).round();
+    final best  = (_progressStats!['best']    as double).round();
+    return Container(
+      color: AppColors.ink.withOpacity(0.03),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+      child: Row(children: [
+        const Icon(Icons.insights_rounded, size: 11, color: AppColors.dim),
+        const SizedBox(width: 8),
+        Text('Context: $total sessions  -.  avg $avg%  -.  best $best%',
+          style: AppText.caption.copyWith(fontSize: 9, color: AppColors.dim)),
+      ]));
+  }
+
+  Widget _bubble(_Msg msg) {
+    final isUser = msg.role == 'user';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: isUser
+          ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+        if (!isUser) ...[
+          Container(width: 34, height: 34,
+            decoration: const BoxDecoration(
+              color: AppColors.amber, border: AppBorders.ink2,
+              boxShadow: [AppShadows.hard3]),
+            child: Center(child: Text('AI',
+              style: AppText.label.copyWith(
+                color: AppColors.ink, fontSize: 9)))),
+          const SizedBox(width: 10),
+        ],
+        Flexible(child: GestureDetector(
+          onTap: (!isUser && _voiceMode)
+            ? () => _speak(msg.text) : null,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isUser ? AppColors.ink : AppColors.white,
+              border: Border.all(
+                color: isUser ? AppColors.ink : AppColors.mist,
+                width: isUser ? 2 : 1.5),
+              boxShadow: isUser
+                ? const [AppShadows.hard3]
+                : [BoxShadow(
+                    color: AppColors.inkAt(0.05),
+                    offset: const Offset(2, 2))]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+              Text(msg.text,
+                style: AppText.body.copyWith(
+                  color: isUser ? Colors.white : AppColors.ink,
+                  height: 1.5)),
+              if (!isUser && _voiceMode) ...[
+                const SizedBox(height: 6),
+                Row(children: [
+                  const Icon(Icons.volume_up_rounded,
+                    size: 11, color: AppColors.dim),
+                  const SizedBox(width: 4),
+                  Text('Tap to replay',
+                    style: AppText.caption.copyWith(
+                      fontSize: 9, color: AppColors.dim)),
+                ]),
+              ],
+            ])),
+        )),
+        if (isUser) ...[
+          const SizedBox(width: 10),
+          Container(width: 34, height: 34,
+            decoration: const BoxDecoration(
+              color: AppColors.red, border: AppBorders.ink2,
+              boxShadow: [AppShadows.hard3]),
+            child: const Center(child: Icon(Icons.person_rounded,
+              color: Colors.white, size: 16))),
+        ],
+      ]));
+  }
+
+  Widget _thinkingBubble() => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: 34, height: 34,
+        decoration: const BoxDecoration(
+          color: AppColors.amber, border: AppBorders.ink2,
+          boxShadow: [AppShadows.hard3]),
+        child: Center(child: Text('AI',
+          style: AppText.label.copyWith(
+            color: AppColors.ink, fontSize: 9)))),
+      const SizedBox(width: 10),
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          border: Border.all(color: AppColors.mist, width: 1.5)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _dot(0), const SizedBox(width: 5),
+          _dot(200), const SizedBox(width: 5),
+          _dot(400),
+        ])),
+    ]));
+
+  Widget _dot(int ms) => TweenAnimationBuilder<double>(
+    tween: Tween(begin: 0.2, end: 1.0),
+    duration: Duration(milliseconds: 600 + ms),
+    builder: (_, v, __) => Container(
+      width: 7, height: 7,
+      decoration: BoxDecoration(
+        color: AppColors.inkAt(v), shape: BoxShape.circle)));
 }
+
+class _Msg {
+  final String role, text;
+  const _Msg({required this.role, required this.text});
+}
+

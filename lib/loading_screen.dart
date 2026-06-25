@@ -1,562 +1,275 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'question_service.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
-import 'main.dart';
+import 'app_theme.dart';
+import 'app_config.dart';
+import 'cloud_function_service.dart';
 import 'interview_screen.dart';
 
 class LoadingScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   final String jobDescription;
+  final String interviewStyle;
+  final List<String> questionCategories;
   final String company;
   final String apiKey;
-
   const LoadingScreen({
     super.key,
-    required this.cameras,
-    required this.jobDescription,
-    required this.company,
-    required this.apiKey,
-  });
-
+    this.interviewStyle = 'friendly',
+    this.questionCategories = const ['behavioural','situational','values','strength'], required this.cameras, required this.jobDescription,
+    required this.company, required this.apiKey});
   @override
   State<LoadingScreen> createState() => _LoadingScreenState();
 }
 
 class _LoadingScreenState extends State<LoadingScreen>
     with TickerProviderStateMixin {
-  late AnimationController _rotationController;
-  late Animation<double> _rotationAnimation;
-  String _loadingText = 'GET READY...';
-  
-  @override
-  void initState() {
-    super.initState();
-    
-    // Initialize rotation animation
-    _rotationController = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    );
-    
-    _rotationAnimation = Tween<double>(
-      begin: 0,
-      end: 2 * pi,
-    ).animate(CurvedAnimation(
-      parent: _rotationController,
-      curve: Curves.linear,
-    ));
-    
-    _rotationController.repeat();
-    
-    // Start the loading process
-    _startLoadingProcess();
-  }
+
+  late final AnimationController _spinCtrl = AnimationController(
+    vsync: this, duration: const Duration(seconds: 2))..repeat();
+  late final AnimationController _pulseCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
+  late final Animation<double> _pulse = Tween<double>(begin: 0.92, end: 1.0)
+      .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+
+  String _status = 'GETTING READY...';
+  int    _step   = 0; // 0,1,2
 
   @override
-  void dispose() {
-    _rotationController.dispose();
-    super.dispose();
+  void initState() { super.initState(); _run(); }
+
+  @override
+  void dispose() { _spinCtrl.dispose(); _pulseCtrl.dispose(); super.dispose(); }
+
+  Future<void> _set(String s, int step, [int ms = 900]) async {
+    if (!mounted) return;
+    setState(() { _status = s; _step = step; });
+    await Future.delayed(Duration(milliseconds: ms));
   }
 
-  void _startLoadingProcess() async {
-    // Check if this is a normal interview (empty job description)
-    bool isNormalInterview = widget.jobDescription.trim().isEmpty;
-    
-    if (isNormalInterview) {
-      // Normal Interview Flow - No API call needed
-      await _updateLoadingText('GET READY...', 1000);
-      await _updateLoadingText('INTERVIEW STARTING\nPREPARING QUESTIONS...', 1000);
-      await _updateLoadingText('QUESTIONS READY!\nSTARTING INTERVIEW...', 1000);
-      
-      // Get default questions and start interview
-      final questions = _getFallbackQuestions(widget.company);
-      
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => InterviewScreen(
-              cameras: widget.cameras,
-              questions: questions,
-              company: widget.company,
-              apiKey: widget.apiKey,
-            ),
-          ),
-        );
-      }
-      return;
-    }
+  Future<void> _run() async {
+    final isGeneric = widget.jobDescription.trim().isEmpty;
+    await _set('GETTING READY...', 0, 800);
+    await _set(isGeneric
+      ? 'PREPARING QUESTIONS...' : 'ANALYSING JOB DESCRIPTION...', 1, 600);
 
-    // AI Powered Interview Flow
-    await _updateLoadingText('GET READY...', 1000);
-    await _updateLoadingText('INTERVIEW STARTING\nGENERATING QUESTIONS...', 500);
-    
     try {
-      final questions = await _generateQuestions(
-        widget.jobDescription,
-        widget.company,
-        widget.apiKey,
-      );
+      final questions = isGeneric
+        ? _fallback(widget.company)
+        : await _generate(widget.jobDescription, widget.company, widget.apiKey);
 
-      if (questions.isNotEmpty) {
-        await _updateLoadingText('QUESTIONS READY!\nSTARTING INTERVIEW...', 1000);
-        
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => InterviewScreen(
-                cameras: widget.cameras,
-                questions: questions,
-                company: widget.company,
-                apiKey: widget.apiKey,
-              ),
-            ),
-          );
-        }
-      } else {
-        _showApiErrorDialog('Using default questions');
-      }
+      await _set('QUESTIONS READY - STARTING...', 2, 800);
+
+      if (mounted) Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => InterviewScreen(interviewStyle: widget.interviewStyle,
+          cameras: widget.cameras, questions: questions,
+          company: widget.company, apiKey: widget.apiKey)));
     } catch (e) {
-      String errorMessage = 'ERROR: ${e.toString()}';
+      _errorDialog(e.toString());
+    }
+  }
+
+  Future<List<String>> _generate(
+      String jobDesc, String company, String apiKey) async {
+    try {
+      final res = await CloudFunctionService.callClaude(
+          model: 'claude-haiku-4-5-20251001',
+          maxTokens: 250,
+          messages: [{'role': 'user', 'content':
+            'Create exactly 5 short interview questions for a candidate applying to $company.\n'
+            'Job description: ${jobDesc.length > 500 ? jobDesc.substring(0, 500) : jobDesc}\n\n'
+            'Rules:\n'
+            '- Each question is ONE simple sentence, max 12 words\n'
+            '- No compound questions (no and/or)\n'
+            '- Gradual: Q1 easy opener, Q2-3 specific, Q4-5 behavioural\n'
+            '- Think friendly HR screen, not executive panel\n\n'
+            'Return ONLY a valid JSON array of 5 strings. No markdown, no numbering.',
+          }],
+        );
+
       
-      if (e.toString().contains('QUOTA_EXCEEDED')) {
-        errorMessage = 'API QUOTA EXCEEDED\nWAIT OR USE DEFAULTS';
-      } else if (e.toString().contains('API_KEY_INVALID')) {
-        errorMessage = 'INVALID API KEY\nCHECK CONFIGURATION';
-      } else if (e.toString().contains('PERMISSION_DENIED')) {
-        errorMessage = 'API ACCESS DENIED\nCHECK ACCOUNT STATUS';
-      } else if (e.toString().contains('timeout')) {
-        errorMessage = 'CONNECTION TIMEOUT\nCHECK INTERNET';
-      }
-      
-      _showApiErrorDialog(errorMessage);
+        final raw   = CloudFunctionService.extractText(res);
+        final clean = raw.replaceAll(RegExp(r'```[a-z]*'), '').replaceAll('```', '').trim();
+        final list  = jsonDecode(clean) as List;
+        if (list.length >= 3) {
+          return list.take(5).map((q) => q.toString()).toList();
+        }
+    } catch (e) {
+      if (kDebugMode) print('Question generation failed: $e');
     }
+    return _fallback(company);
   }
 
-  Future<void> _updateLoadingText(String text, int delayMs) async {
-    setState(() {
-      _loadingText = text;
-    });
-    await Future.delayed(Duration(milliseconds: delayMs));
-  }
+  List<String> _fallback(String company) => [
+    'Can you tell me a little about yourself?',
+    'Why are you interested in working at $company?',
+    'What would you say is your greatest strength?',
+    'Tell me about a time you had to solve a difficult problem at work.',
+    'Where do you see yourself in the next two to three years?',
+  ];
 
-  Future<List<String>> _generateQuestions(String jobDesc, String company, String apiKey) async {
-    for (int attempt = 1; attempt <= 3; attempt++) {
-      try {
-        print('Attempting to generate questions with Gemini API (attempt $attempt/3)...');
-        
-        // Updated to use Gemini 2.0 Flash model
-        final String baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-        
-        final response = await http.post(
-          Uri.parse('$baseUrl?key=$apiKey'),
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({
-            'contents': [
-              {
-                'parts': [
-                  {
-                    'text': '''Create 8 interview questions for $company. Job: ${jobDesc.length > 500 ? "${jobDesc.substring(0, 500)}..." : jobDesc}
-
-Return 8 numbered questions covering technical skills, behavioral scenarios, company fit, and problem-solving. Each question should be on a separate line starting with a number.''',
-                  }
-                ]
-              }
-            ],
-            'generationConfig': {
-              'temperature': 0.7,
-              'topK': 40,
-              'topP': 0.95,
-              'maxOutputTokens': 600,
-            },
-            'safetySettings': [
-              {
-                'category': 'HARM_CATEGORY_HARASSMENT',
-                'threshold': 'BLOCK_MEDIUM_AND_ABOVE'
-              },
-              {
-                'category': 'HARM_CATEGORY_HATE_SPEECH',
-                'threshold': 'BLOCK_MEDIUM_AND_ABOVE'
-              },
-              {
-                'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                'threshold': 'BLOCK_MEDIUM_AND_ABOVE'
-              },
-              {
-                'category': 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                'threshold': 'BLOCK_MEDIUM_AND_ABOVE'
-              }
-            ]
-          }),
-        ).timeout(const Duration(seconds: 30));
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          
-          // Parse Gemini API response
-          if (data['candidates'] != null && 
-              data['candidates'].isNotEmpty && 
-              data['candidates'][0]['content'] != null &&
-              data['candidates'][0]['content']['parts'] != null &&
-              data['candidates'][0]['content']['parts'].isNotEmpty) {
-            
-            final content = data['candidates'][0]['content']['parts'][0]['text'];
-            
-            final lines = content.split('\n');
-            final questions = <String>[];
-            
-            for (final line in lines) {
-              final trimmed = line.trim();
-              if (trimmed.isNotEmpty && RegExp(r'^\d+\.').hasMatch(trimmed)) {
-                final question = trimmed.replaceFirst(RegExp(r'^\d+\.\s*'), '');
-                if (question.isNotEmpty) {
-                  questions.add(question);
-                }
-              }
-            }
-            
-            if (questions.isNotEmpty) {
-              if (kDebugMode) {
-                print('Successfully generated ${questions.length} questions via Gemini API');
-              }
-              return questions.take(8).toList();
-            }
-          }
-        } else if (response.statusCode == 429) {
-          if (kDebugMode) {
-            print('Quota exceeded (429). Waiting before retry...');
-          }
-          if (attempt < 3) {
-            await Future.delayed(Duration(seconds: attempt * 2));
-            continue;
-          }
-          throw Exception('QUOTA_EXCEEDED');
-        } else if (response.statusCode == 400) {
-          final errorData = jsonDecode(response.body);
-          if (errorData['error'] != null && errorData['error']['message'] != null) {
-            final errorMsg = errorData['error']['message'].toString();
-            if (errorMsg.contains('API_KEY_INVALID') || errorMsg.contains('API key')) {
-              throw Exception('API_KEY_INVALID');
-            }
-          }
-          throw Exception('Bad request: ${response.body}');
-        } else if (response.statusCode == 403) {
-          throw Exception('PERMISSION_DENIED');
-        } else {
-          throw Exception('Gemini API error: ${response.statusCode} - ${response.body}');
-        }
-      } on TimeoutException {
-        if (kDebugMode) {
-          print('Request timeout on attempt $attempt');
-        }
-        if (attempt == 3) {
-          throw Exception('Request timeout. Please check your internet connection.');
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          print('Gemini API attempt $attempt failed: $e');
-        }
-        if (attempt == 3) {
-          rethrow;
-        }
-        await Future.delayed(Duration(seconds: attempt));
-      }
-    }
-
-    if (kDebugMode) {
-      print('Gemini API failed, using fallback questions...');
-    }
-    return _getFallbackQuestions(company);
-  }
-
-  List<String> _getFallbackQuestions(String company) {
-    return [
-      'Tell me about yourself and your professional background.',
-      'Why are you interested in working at $company?',
-      'What are your greatest strengths and how do they apply to this role?',
-      'Describe a challenging project you worked on and how you overcame obstacles.',
-      'How do you handle working under pressure and tight deadlines?',
-      'Where do you see yourself professionally in the next 5 years?',
-      'What do you know about our company culture and values?',
-      'Do you have any questions about the role or our team?',
-    ];
-  }
-
-  void _showApiErrorDialog(String errorMessage) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
+  void _errorDialog(String msg) {
+    showDialog(context: context, barrierDismissible: false,
+      builder: (dlg) => Dialog(backgroundColor: Colors.transparent,
         child: Container(
-          width: 320,
-          decoration: BoxDecoration(
-            border: Border.all(color: BauhausColors.black, width: 4),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                color: BauhausColors.yellow,
-                child: Text(
-                  'API ISSUE',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                    color: BauhausColors.black,
-                    letterSpacing: 2,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                color: BauhausColors.white,
-                child: Column(
-                  children: [
-                    Text(
-                      '$errorMessage\n\nCONTINUE WITH DEFAULTS?',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: BauhausColors.black,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            height: 40,
-                            color: BauhausColors.gray,
-                            child: MaterialButton(
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                Navigator.of(context).pop();
-                              },
-                              child: Text(
-                                'CANCEL',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w900,
-                                  color: BauhausColors.white,
-                                  letterSpacing: 1,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Container(
-                            height: 40,
-                            color: BauhausColors.red,
-                            child: MaterialButton(
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                final fallbackQuestions = _getFallbackQuestions(widget.company);
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(
-                                    builder: (context) => InterviewScreen(
-                                      cameras: widget.cameras,
-                                      questions: fallbackQuestions,
-                                      company: widget.company,
-                                      apiKey: widget.apiKey,
-                                    ),
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                'CONTINUE',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w900,
-                                  color: BauhausColors.white,
-                                  letterSpacing: 1,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+          decoration: AppDecorations.dialog,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              color: AppColors.amber,
+              child: Row(children: [
+                const Icon(Icons.warning_rounded, color: AppColors.ink, size: 20),
+                const SizedBox(width: 10),
+                Text('API ISSUE', style: AppText.title.copyWith(
+                  color: AppColors.ink, letterSpacing: 2)),
+              ])),
+            Padding(padding: const EdgeInsets.all(20),
+              child: Column(children: [
+                Text('$msg\n\nContinue with default questions?',
+                  style: AppText.body, textAlign: TextAlign.center),
+                const SizedBox(height: 20),
+                Row(children: [
+                  Expanded(child: GestureDetector(
+                    onTap: () { Navigator.pop(dlg); Navigator.pop(context); },
+                    child: Container(height: 46,
+                      decoration: const BoxDecoration(
+                        color: AppColors.white, border: AppBorders.ink2),
+                      child: Center(child: Text('CANCEL',
+                        style: AppText.button.copyWith(color: AppColors.ink)))))),
+                  const SizedBox(width: 12),
+                  Expanded(child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(dlg);
+                      Navigator.of(context).pushReplacement(MaterialPageRoute(
+                        builder: (_) => InterviewScreen(interviewStyle: widget.interviewStyle,
+                          cameras: widget.cameras,
+                          questions: _fallback(widget.company),
+                          company: widget.company,
+                          apiKey: widget.apiKey)));
+                    },
+                    child: Container(height: 46,
+                      decoration: const BoxDecoration(
+                        color: AppColors.red, border: AppBorders.ink2,
+                        boxShadow: [AppShadows.hard3]),
+                      child: Center(child: Text('CONTINUE',
+                        style: AppText.button))))),
+                ]),
+              ])),
+          ]))));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: BauhausColors.lightGray,
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Company name at top
-              Text(
-                widget.company.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  color: BauhausColors.black,
-                  letterSpacing: 4,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              
-              const SizedBox(height: 60),
-              
-              // Spinning red geometric shape
-              AnimatedBuilder(
-                animation: _rotationAnimation,
-                builder: (context, child) {
-                  return Transform.rotate(
-                    angle: _rotationAnimation.value,
-                    child: Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: BauhausColors.red,
-                        border: Border.all(color: BauhausColors.black, width: 4),
-                        // Using rectangle instead of circle for Bauhaus geometric style
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Stack(
-                        children: [
-                          // Inner yellow triangle
-                          Positioned.fill(
-                            child: Center(
-                              child: CustomPaint(
-                                size: Size(40, 40),
-                                painter: TrianglePainter(BauhausColors.yellow),
-                              ),
-                            ),
-                          ),
-                          // Blue circle in corner
-                          Positioned(
-                            top: 8,
-                            right: 8,
-                            child: Container(
-                              width: 20,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: BauhausColors.blue,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-              
-              const SizedBox(height: 60),
-              
-              // Loading text
-              Text(
-                _loadingText,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: BauhausColors.black,
-                  letterSpacing: 3,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              
-              const SizedBox(height: 20),
-              
-              // Additional info text
-              Container(
-                width: 300,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: BauhausColors.black, width: 3),
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      color: BauhausColors.blue,
-                      child: Text(
-                        widget.jobDescription.trim().isEmpty ? 'PREPARING QUESTIONS' : 'AI PROCESSING',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w900,
-                          color: BauhausColors.white,
-                          letterSpacing: 2,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      color: BauhausColors.white,
-                      child: Text(
-                        widget.jobDescription.trim().isEmpty 
-                            ? 'LOADING STANDARD INTERVIEW QUESTIONS\nOPTIMIZED FOR ${widget.company.toUpperCase()}'
-                            : 'ANALYZING YOUR JOB REQUIREMENTS\nAND CREATING PERSONALIZED QUESTIONS',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: BauhausColors.black,
-                          letterSpacing: 1,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+      backgroundColor: AppColors.cream,
+      body: SafeArea(child: Stack(children: [
+        // Geometric accents
+        Positioned(top: -40, right: -40,
+          child: Container(width: 130, height: 130,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.amber.withOpacity(0.12),
+              border: Border.all(
+                color: AppColors.amber.withOpacity(0.25), width: 1.5)))),
+        Positioned(bottom: 80, left: -20,
+          child: Container(width: 60, height: 14,
+            color: AppColors.blue.withOpacity(0.15))),
+
+        Center(child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            // Company label
+            AppWidgets.badge(widget.company.toUpperCase(), bg: AppColors.ink, fg: Colors.white),
+            const SizedBox(height: 40),
+
+            // Spinning Bauhaus shape
+            AnimatedBuilder(animation: _spinCtrl,
+              builder: (_, __) => Transform.rotate(
+                angle: _spinCtrl.value * 2 * pi,
+                child: Container(width: 110, height: 110,
+                  decoration: BoxDecoration(
+                    color: AppColors.red,
+                    border: AppBorders.ink3,
+                    boxShadow: const [AppShadows.hard5]),
+                  child: Stack(children: [
+                    Positioned(top: 10, right: 10,
+                      child: Container(width: 22, height: 22,
+                        decoration: const BoxDecoration(
+                          color: AppColors.amber, shape: BoxShape.circle))),
+                    Center(child: Container(width: 36, height: 36,
+                      color: AppColors.ink)),
+                  ])))),
+
+            const SizedBox(height: 48),
+
+            // Status text
+            AnimatedBuilder(animation: _pulseCtrl,
+              builder: (_, __) => Transform.scale(
+                scale: _pulse.value,
+                child: Text(_status,
+                  style: AppText.title.copyWith(letterSpacing: 2),
+                  textAlign: TextAlign.center))),
+
+            const SizedBox(height: 32),
+
+            // Step progress
+            Container(
+              width: double.infinity,
+              decoration: AppDecorations.cardSmall,
+              child: Column(children: [
+                Container(height: 4,
+                  color: _step == 0 ? AppColors.amber
+                       : _step == 1 ? AppColors.blue
+                       : AppColors.red),
+                Padding(padding: const EdgeInsets.all(16),
+                  child: Row(children: List.generate(3, (i) {
+                    final done  = i < _step;
+                    final active = i == _step;
+                    final labels = ['GET READY', 'GENERATE', 'START'];
+                    final colors = [AppColors.amber, AppColors.blue, AppColors.red];
+                    return Expanded(child: Row(children: [
+                      if (i > 0) Expanded(child: Container(height: 1.5,
+                        color: done ? colors[i] : AppColors.mist)),
+                      Column(children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: 28, height: 28,
+                          decoration: BoxDecoration(
+                            color: done || active ? colors[i] : AppColors.mist,
+                            border: Border.all(color: AppColors.ink, width: 1.5)),
+                          child: Center(child: done
+                            ? const Icon(Icons.check_rounded,
+                                color: Colors.white, size: 14)
+                            : Text('${i + 1}', style: AppText.label.copyWith(
+                                color: active ? Colors.white : AppColors.dim)))),
+                        const SizedBox(height: 4),
+                        Text(labels[i], style: AppText.label.copyWith(
+                          fontSize: 7,
+                          color: active ? colors[i] : AppColors.dim)),
+                      ]),
+                      if (i == 2) const SizedBox.shrink(),
+                    ]));
+                  }))),
+              ])),
+
+            const SizedBox(height: 24),
+            Text(
+              widget.jobDescription.isEmpty
+                ? 'LOADING STANDARD QUESTIONS'
+                : 'AI IS ANALYSING YOUR JOB REQUIREMENTS',
+              style: AppText.caption.copyWith(letterSpacing: 1.5),
+              textAlign: TextAlign.center),
+          ])),
         ),
-      ),
+      ])),
     );
   }
 }
 
-// Custom painter for triangle
-class TrianglePainter extends CustomPainter {
-  final Color color;
-  
-  TrianglePainter(this.color);
-  
-  @override
-  void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    
-    Path path = Path();
-    path.moveTo(size.width / 2, 0);
-    path.lineTo(0, size.height);
-    path.lineTo(size.width, size.height);
-    path.close();
-    
-    canvas.drawPath(path, paint);
-  }
-  
-  @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
-}
+
+

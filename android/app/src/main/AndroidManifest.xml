@@ -36,7 +36,8 @@
 
     
     <application
-        android:label="ITSAGO AI"
+        android:enableOnBackInvokedCallback="true"
+        android:label="ITSAGO"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

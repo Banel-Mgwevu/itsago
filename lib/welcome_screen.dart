@@ -1,507 +1,271 @@
-import 'package:camera/camera.dart'; //AIzaSyBG9Ibtg3a0UTO5DZb4mfhmN7mtij_OMPU
-import 'package:flutter/material.dart';
-import 'main.dart';
-import 'purpose_selection_screen.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'app_theme.dart';
+import 'main_menu_screen.dart';
 
-class WelcomeScreen extends StatefulWidget {
+class OnboardingScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  
-  const WelcomeScreen({Key? key, required this.cameras}) : super(key: key);
-
+  const OnboardingScreen({super.key, required this.cameras});
   @override
-  State<WelcomeScreen> createState() => _WelcomeScreenState();
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _WelcomeScreenState extends State<WelcomeScreen>
+class _OnboardingScreenState extends State<OnboardingScreen>
     with TickerProviderStateMixin {
-  
-  late AnimationController _slideController;
-  late AnimationController _fadeController;
-  late AnimationController _geometryController;
-  
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _geometryAnimation;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeAnimations();
-    _startAnimations();
-  }
+  final PageController _pages = PageController();
+  int _current = 0;
 
-  void _initializeAnimations() {
-    _slideController = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-    
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    
-    _geometryController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-    
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.5),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _slideController,
-      curve: Curves.easeOut,
-    ));
-    
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeOut,
-    ));
-    
-    _geometryAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _geometryController,
-      curve: Curves.elasticOut,
-    ));
-  }
+  late final AnimationController _slideCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 700))..forward();
+  late final AnimationController _scaleCtrl = AnimationController(
+    vsync: this, duration: const Duration(milliseconds: 800))..forward();
 
-  void _startAnimations() async {
-    _geometryController.forward();
-    await Future.delayed(const Duration(milliseconds: 200));
-    _slideController.forward();
-    await Future.delayed(const Duration(milliseconds: 100));
-    _fadeController.forward();
-  }
+  Animation<double> _fade(double a, double b) => Tween<double>(begin: 0, end: 1)
+      .animate(CurvedAnimation(parent: _slideCtrl,
+          curve: Interval(a, b, curve: Curves.easeOut)));
+  Animation<Offset> _slide(double a, double b) =>
+      Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero)
+          .animate(CurvedAnimation(parent: _slideCtrl,
+              curve: Interval(a, b, curve: Curves.easeOut)));
+  late final Animation<double> _scaleAnim = Tween<double>(begin: 0, end: 1)
+      .animate(CurvedAnimation(parent: _scaleCtrl, curve: Curves.elasticOut));
 
   @override
   void dispose() {
-    _slideController.dispose();
-    _fadeController.dispose();
-    _geometryController.dispose();
+    _pages.dispose(); _slideCtrl.dispose(); _scaleCtrl.dispose();
     super.dispose();
+  }
+
+  void _next() {
+    if (_current < _slides.length - 1) {
+      _pages.nextPage(
+        duration: const Duration(milliseconds: 500), curve: Curves.easeOut);
+    } else {
+      _finish();
+    }
+  }
+
+  void _finish() => Navigator.of(context).pushReplacement(PageRouteBuilder(
+    pageBuilder: (_, __, ___) => MainMenuScreen(cameras: widget.cameras),
+    transitionsBuilder: (_, a, __, child) => FadeTransition(
+      opacity: a, child: child),
+    transitionDuration: const Duration(milliseconds: 600)));
+
+  void _onPageChanged(int i) {
+    setState(() => _current = i);
+    _scaleCtrl.reset(); _scaleCtrl.forward();
+    _slideCtrl.reset(); _slideCtrl.forward();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: BauhausColors.lightGray,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // Geometric background elements
-            AnimatedBuilder(
-              animation: _geometryController,
-              builder: (context, child) {
-                return Stack(
+      backgroundColor: AppColors.cream,
+      body: SafeArea(child: Column(children: [
+        // ── Header bar ──────────────────────────────────
+        Container(
+          color: AppColors.ink,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(children: [
+            // Progress dots
+            Row(children: List.generate(_slides.length, (i) =>
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                margin: const EdgeInsets.only(right: 6),
+                width: _current == i ? 24 : 8, height: 4,
+                color: _current == i ? AppColors.amber : AppColors.inkAt(0.3)))),
+            const Spacer(),
+            AppWidgets.badge('ITSAGO AI'),
+            const SizedBox(width: 8),
+            // Skip
+            GestureDetector(
+              onTap: _finish,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: const BoxDecoration(
+                  border: AppBorders.amber1),
+                child: Text('SKIP',
+                  style: AppText.label.copyWith(color: AppColors.amber)))),
+          ])),
+
+        // ── Pages ────────────────────────────────────────
+        Expanded(child: PageView.builder(
+          controller: _pages,
+          onPageChanged: _onPageChanged,
+          itemCount: _slides.length,
+          itemBuilder: (_, i) => _buildSlide(_slides[i]))),
+
+        // ── Bottom nav ───────────────────────────────────
+        Container(
+          color: AppColors.white,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(children: [
+            Container(height: 1.5, color: AppColors.mist),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: _next,
+              child: Container(
+                width: double.infinity, height: 56,
+                decoration: BoxDecoration(
+                  color: _slides[_current].accent,
+                  border: AppBorders.ink2,
+                  boxShadow: const [AppShadows.hard4]),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Large yellow circle - top left
-                    Positioned(
-                      top: -100 + (50 * _geometryAnimation.value),
-                      left: -100 + (30 * _geometryAnimation.value),
-                      child: Transform.scale(
-                        scale: _geometryAnimation.value,
-                        child: Container(
-                          width: 200,
-                          height: 200,
-                          decoration: BoxDecoration(
-                            color: BauhausColors.yellow.withOpacity(0.8),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                    ),
-                    
-                    // Blue rectangle - top right
-                    Positioned(
-                      top: 80,
-                      right: -50 + (30 * _geometryAnimation.value),
-                      child: Transform.scale(
-                        scale: _geometryAnimation.value,
-                        child: Container(
-                          width: 120,
-                          height: 60,
-                          color: BauhausColors.blue,
-                        ),
-                      ),
-                    ),
-                    
-                    // Red triangle - bottom right
-                    Positioned(
-                      bottom: 100,
-                      right: 40,
-                      child: Transform.scale(
-                        scale: _geometryAnimation.value,
-                        child: CustomPaint(
-                          size: const Size(80, 80),
-                          painter: TrianglePainter(BauhausColors.red),
-                        ),
-                      ),
-                    ),
-                    
-                    // Small black squares
-                    Positioned(
-                      top: 300,
-                      left: 50,
-                      child: Transform.scale(
-                        scale: _geometryAnimation.value,
-                        child: Container(
-                          width: 20,
-                          height: 20,
-                          color: BauhausColors.black,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-            
-            // Main content
-            SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 40),
-                    
-                    // Header section
-                    SlideTransition(
-                      position: _slideAnimation,
-                      child: FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // App logo and name
-                            Row(
-                              children: [
-                                Container(
-                                  width: 80,
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    color: BauhausColors.white,
-                                    border: Border.all(
-                                      color: BauhausColors.black,
-                                      width: 3,
-                                    ),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      'I',
-                                      style: TextStyle(
-                                        fontSize: 36,
-                                        fontWeight: FontWeight.w900,
-                                        color: BauhausColors.black,
-                                        letterSpacing: 2,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 20),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'ITSAGO',
-                                        style: TextStyle(
-                                          fontSize: 32,
-                                          fontWeight: FontWeight.w900,
-                                          color: BauhausColors.black,
-                                          letterSpacing: 4,
-                                        ),
-                                      ),
-                                      Container(
-                                        width: 80,
-                                        height: 3,
-                                        color: BauhausColors.red,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'AI INTERVIEW PREP',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: BauhausColors.gray,
-                                          letterSpacing: 1,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            
-                            const SizedBox(height: 50),
-                            
-                            // Welcome title
-                            Text(
-                              'WELCOME TO THE',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                color: BauhausColors.gray,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                            Text(
-                              'FUTURE OF',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
-                                color: BauhausColors.black,
-                                letterSpacing: 3,
-                                height: 1.1,
-                              ),
-                            ),
-                            Text(
-                              'INTERVIEW',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
-                                color: BauhausColors.blue,
-                                letterSpacing: 3,
-                                height: 1.1,
-                              ),
-                            ),
-                            Text(
-                              'PREPARATION',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
-                                color: BauhausColors.red,
-                                letterSpacing: 3,
-                                height: 1.1,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 40),
-                    
-                    // Features section
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: Column(
-                        children: [
-                          _buildFeatureCard(
-                            'GENERATE SMART QUESTIONS',
-                            'AI-powered questions tailored to your specific job role and company',
-                            BauhausColors.yellow,
-                            Icons.psychology,
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          
-                          _buildFeatureCard(
-                            'IMPROVE COMMUNICATION',
-                            'Enhance your speaking skills and build confidence for any interview',
-                            BauhausColors.blue,
-                            Icons.record_voice_over,
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          
-                          _buildFeatureCard(
-                            'BODY LANGUAGE ANALYSIS',
-                            'Real-time feedback on posture, gestures, and non-verbal communication',
-                            BauhausColors.red,
-                            Icons.accessibility_new,
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          
-                          _buildFeatureCard(
-                            'PERSONALIZED FEEDBACK',
-                            'Detailed analysis and actionable suggestions for improvement',
-                            BauhausColors.black,
-                            Icons.analytics,
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 40),
-                    
-                    // Call to action
-                    SlideTransition(
-                      position: _slideAnimation,
-                      child: FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Column(
-                          children: [
-                            Container(
-                              width: double.infinity,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                color: BauhausColors.red,
-                                border: Border.all(
-                                  color: BauhausColors.black,
-                                  width: 3,
-                                ),
-                              ),
-                              child: MaterialButton(
-                                onPressed: _continueToNext,
-                                child: Text(
-                                  'GET STARTED',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w900,
-                                    color: BauhausColors.white,
-                                    letterSpacing: 3,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            
-                            const SizedBox(height: 20),
-                            
-                            Text(
-                              'POWERED BY ARTIFICIAL INTELLIGENCE',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: BauhausColors.gray,
-                                letterSpacing: 1,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 40),
-                  ],
-                ),
-              ),
-            ),
-          ],
+                    Text(_current == _slides.length - 1
+                        ? 'GET STARTED' : 'NEXT',
+                      style: AppText.button.copyWith(
+                        color: _slides[_current].accent == AppColors.amber
+                          ? AppColors.ink : Colors.white,
+                        letterSpacing: 2)),
+                    const SizedBox(width: 10),
+                    Icon(
+                      _current == _slides.length - 1
+                        ? Icons.rocket_launch_rounded
+                        : Icons.arrow_forward_rounded,
+                      color: _slides[_current].accent == AppColors.amber
+                        ? AppColors.ink : Colors.white,
+                      size: 18),
+                  ])),
+          )]),
         ),
-      ),
+      ])),
     );
   }
 
-  Widget _buildFeatureCard(String title, String description, Color color, IconData icon) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        border: Border.all(color: BauhausColors.black, width: 3),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            height: 80,
-            color: color,
-            child: Row(
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  color: color == BauhausColors.black 
-                      ? BauhausColors.white 
-                      : BauhausColors.white.withOpacity(0.2),
-                  child: Icon(
-                    icon,
-                    size: 40,
-                    color: color == BauhausColors.black 
-                        ? BauhausColors.black 
-                        : color == BauhausColors.yellow 
-                            ? BauhausColors.black 
-                            : BauhausColors.white,
-                  ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: color == BauhausColors.yellow 
-                            ? BauhausColors.black 
-                            : BauhausColors.white,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            width: double.infinity,
-            color: BauhausColors.white,
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              description,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: BauhausColors.black,
-                height: 1.4,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  Widget _buildSlide(_Slide s) {
+    final isAmber = s.accent == AppColors.amber;
+    final iconFg = isAmber ? AppColors.ink : Colors.white;
+    return AnimatedBuilder(
+      animation: Listenable.merge([_slideCtrl, _scaleCtrl]),
+      builder: (_, __) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Icon box
+            Transform.scale(scale: _scaleAnim.value,
+              child: Container(
+                width: 130, height: 130,
+                decoration: BoxDecoration(
+                  color: s.accent,
+                  border: AppBorders.ink3,
+                  boxShadow: [AppShadows.hard5]),
+                child: Stack(children: [
+                  // Geometric inset
+                  Positioned(top: 0, right: 0,
+                    child: Container(width: 28, height: 28,
+                      color: isAmber
+                        ? AppColors.inkAt(0.1)
+                        : Colors.white.withOpacity(0.12))),
+                  Positioned(bottom: 10, left: 10,
+                    child: Container(width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isAmber
+                          ? AppColors.inkAt(0.15)
+                          : Colors.white.withOpacity(0.2)))),
+                  Center(child: Icon(s.icon, size: 52, color: iconFg)),
+                ]))),
+
+            const SizedBox(height: 36),
+
+            // Label
+            FadeTransition(opacity: _fade(0.2, 0.7),
+              child: AppWidgets.sectionLabel(
+                s.tagline, accent: s.accent)),
+
+            const SizedBox(height: 14),
+
+            // Title
+            FadeTransition(opacity: _fade(0.25, 0.75),
+              child: SlideTransition(position: _slide(0.25, 0.75),
+                child: Text(s.title,
+                  style: AppText.display.copyWith(fontSize: 32, height: 1.0),
+                  textAlign: TextAlign.left))),
+
+            const SizedBox(height: 16),
+
+            // Description card
+            FadeTransition(opacity: _fade(0.35, 0.9),
+              child: SlideTransition(position: _slide(0.35, 0.9),
+                child: Container(
+                  width: double.infinity,
+                  decoration: AppDecorations.cardSmall,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                    Container(height: 4, color: s.accent),
+                    Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Text(s.desc, style: AppText.body)),
+                    // Feature bullets
+                    ...s.bullets.map((b) => Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                        Container(width: 6, height: 6,
+                          margin: const EdgeInsets.only(top: 4, right: 10),
+                          color: s.accent),
+                        Expanded(child: Text(b, style: AppText.caption.copyWith(
+                          height: 1.4, fontSize: 11))),
+                      ]))),
+                    const SizedBox(height: 4),
+                  ])))),
+          ])));
   }
 
-  void _continueToNext() {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            PurposeSelectionScreen(cameras: widget.cameras),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1.0, 0.0),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-            )),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 600),
-      ),
-    );
-  }
+  static final List<_Slide> _slides = [
+    _Slide(
+      accent:  AppColors.ink,
+      icon:    Icons.waving_hand_rounded,
+      tagline: 'WELCOME',
+      title:   'MEET\nITSAGO',
+      desc:    'SA first AI interview coach and CV builder. Get hired faster, starting today.',
+      bullets: ['Practice anytime, anywhere', 'AI that adapts to your role', 'Free to use']),
+    _Slide(
+      accent:  AppColors.red,
+      icon:    Icons.video_camera_front_rounded,
+      tagline: 'FEATURE 01',
+      title:   'PRACTICE\nINTERVIEWS',
+      desc:    'Realistic AI-powered mock sessions tailored to your industry and target company.',
+      bullets: ['Real-time video & audio analysis', 'Industry-specific questions', 'Instant scoring & feedback']),
+    _Slide(
+      accent:  AppColors.blue,
+      icon:    Icons.psychology_rounded,
+      tagline: 'FEATURE 02',
+      title:   'AI\nCOACH',
+      desc:    'Your personal AI career coach. Get tailored advice, interview tips and strategies — anytime you need them.',
+      bullets: ['Personalised interview strategy', 'Industry-specific tips', '24/7 AI career support']),
+    _Slide(
+      accent:  AppColors.red,
+      icon:    Icons.auto_fix_high_rounded,
+      tagline: 'FEATURE 03',
+      title:   'ATS CV\nBUILDER',
+      desc:    'Upload your CV and our AI rewrites it to beat ATS filters — then builds 4 job-ready designs you can send today.',
+      bullets: ['4 Bauhaus-inspired templates', 'ATS compatibility scoring', 'Download PDF & Word']),
+    _Slide(
+      accent:  AppColors.red,
+      icon:    Icons.rocket_launch_rounded,
+      tagline: 'LET\'S GO',
+      title:   'YOU\'RE\nREADY',
+      desc:    'Everything you need to walk into your next interview with total confidence.',
+      bullets: ['Practice anytime, anywhere', 'AI adapts to your role', 'Free to use']),
+  ];
 }
 
-class TrianglePainter extends CustomPainter {
-  final Color color;
-  
-  TrianglePainter(this.color);
-  
-  @override
-  void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    
-    Path path = Path();
-    path.moveTo(size.width / 2, 0);
-    path.lineTo(0, size.height);
-    path.lineTo(size.width, size.height);
-    path.close();
-    
-    canvas.drawPath(path, paint);
-  }
-  
-  @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
+class _Slide {
+  final Color    accent;
+  final IconData icon;
+  final String   tagline;
+  final String   title;
+  final String   desc;
+  final List<String> bullets;
+  const _Slide({
+    required this.accent, required this.icon, required this.tagline,
+    required this.title, required this.desc, required this.bullets});
 }
+

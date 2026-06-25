@@ -4,38 +4,33 @@ plugins {
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
 }
-
 android {
     namespace = "com.itsago.interviewai"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
-
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
     }
-
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
-
     defaultConfig {
         applicationId = "com.itsago.interviewai"
-        minSdk = 23
-        targetSdk = flutter.targetSdkVersion
-        versionCode = 10
-        versionName = flutter.versionName
+        minSdkVersion flutter.minSdkVersion
+        targetSdk = 35
+        versionCode = 30
+        versionName flutter.versionName
     }
-
     signingConfigs {
         main {
-            storeFile file("C:/Users/X/Desktop/Ai/keystore/my-release-key.jks")
-            storePassword "58985898"
-            keyAlias "my-key-alias"
-            keyPassword "58985898"
+        storeFile file("C:/Users/banel/Desktop/ITSAGO PREP/itsago/upload-keystore-new.jks")
+        storePassword "Itsago2025!"
+        keyAlias "upload"
+        keyPassword "Itsago2025!"
         }
     }
-
     buildTypes {
         debug {
             signingConfig signingConfigs.main
@@ -48,11 +43,13 @@ android {
         }
     }
     dependencies {
-    implementation "com.google.android.play:integrity:1.5.0"
-   }
-
+        implementation "com.google.android.play:integrity:1.5.0"
+    }
 }
-
 flutter {
     source = "../.."
+}
+dependencies {
+    implementation 'androidx.activity:activity-ktx:1.9.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
 }

@@ -1,46 +1,38 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
+import 'dart:io';
 import 'audio_speech_manager.dart';
 
 class CameraFaceManager {
-  // Constructor dependencies
   final List<CameraDescription> cameras;
-  final Function() onCameraInitialized;
-  final Function(bool faceDetected) onFaceDetectionChange;
-  final Function(bool showingWarning) onFaceWarning;
+  final Function()              onCameraInitialized;
+  final Function(bool)          onFaceDetectionChange;
+  final Function(bool)          onFaceWarning;
 
-  // Camera controller
   late CameraController _cameraController;
   bool _cameraInitialized = false;
+  bool _disposed          = false;
 
-  // Face detection variables
   late FaceDetector _faceDetector;
-  bool _faceDetectionInitialized = false;
-  bool _isProcessingImage = false;
-  bool _faceDetected = false;
+  bool      _faceDetectionInitialized = false;
+  bool      _isProcessingImage        = false;
+  bool      _faceDetected             = false;
   DateTime? _lastFaceDetectedTime;
-  Timer? _faceDetectionTimer;
-  Timer? _noFaceWarningTimer;
-  bool _showingFaceWarning = false;
-  bool _faceWarningTtsPlaying = false;
-  int _noFaceWarningCount = 0;
-  Timer? _faceDetectionProcessingTimer;
+  Timer?    _faceDetectionTimer;
+  Timer?    _processingTimer;
+  Timer?    _noFaceWarningTimer;
+  bool      _showingFaceWarning       = false;
+  bool      _faceWarningTtsPlaying    = false;
+  int       _noFaceWarningCount       = 0;
+  int       _eyeContactFrames         = 0; // frames where eyes are open/on camera
+  int       _totalDetectionFrames     = 0; // total frames with face detected
+  double    _eyeContactScore          = 100.0; // 0-100
 
-  // Audio reference for face warnings
-  AudioSpeechManager? _audioSpeechManager;
-
-  // Face detection warning messages
-  final List<String> _faceWarningMessages = [
-    "Hi, are you there? I don't see you on camera.",
-    "Please make sure you're visible in the camera frame.",
-    "I can't see your face. Please position yourself in front of the camera.",
-    "Hi, get back there, I do not see you.",
-    "Please ensure your face is visible for the interview to continue.",
-  ];
+  AudioSpeechManager? _audio;
 
   CameraFaceManager({
     required this.cameras,
@@ -49,125 +41,98 @@ class CameraFaceManager {
     required this.onFaceWarning,
   });
 
-  // Public interface methods
-  Future<void> initializeCamera() async {
-    if (_cameraInitialized) return;
+  // ── Public API ───────────────────────────────────────────────
 
-    var cameraStatus = await Permission.camera.request();
-    var micStatus = await Permission.microphone.request();
-    
-    if (kDebugMode) {
-      print('Camera permission: $cameraStatus');
-    }
-    if (kDebugMode) {
-      print('Microphone permission: $micStatus');
-    }
-    
-    CameraDescription? frontCamera;
-    for (CameraDescription camera in cameras) {
-      if (camera.lensDirection == CameraLensDirection.front) {
-        frontCamera = camera;
-        break;
-      }
-    }
-    
-    frontCamera ??= cameras.first;
-    
+  Future<void> initializeCamera() async {
+    if (_cameraInitialized || _disposed) return;
+    await Permission.camera.request();
+    await Permission.microphone.request();
+
+    CameraDescription front = cameras.firstWhere(
+      (c) => c.lensDirection == CameraLensDirection.front,
+      orElse: () => cameras.first);
+
     _cameraController = CameraController(
-      frontCamera,
-      ResolutionPreset.high,
+      front, ResolutionPreset.high,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-    
+      imageFormatGroup: ImageFormatGroup.jpeg);
+
     try {
       await _cameraController.initialize();
-      
       await _cameraController.setFlashMode(FlashMode.off);
       await _cameraController.setFocusMode(FocusMode.auto);
       await _cameraController.setExposureMode(ExposureMode.auto);
-      
-      if (kDebugMode) {
-        print('Selfie camera initialized successfully with high quality');
-      }
-      _cameraInitialized = true;
-      onCameraInitialized();
-    } catch (e) {
-      if (kDebugMode) {
-        print('Camera initialization error: $e');
-      }
-      // Fallback to medium quality
+    } catch (_) {
       _cameraController = CameraController(
-        frontCamera,
-        ResolutionPreset.medium,
-        enableAudio: false,
-      );
+          front, ResolutionPreset.medium, enableAudio: false);
       await _cameraController.initialize();
-      _cameraInitialized = true;
-      onCameraInitialized();
-      if (kDebugMode) {
-        print('Fallback: Camera initialized with medium quality');
-      }
     }
+    _cameraInitialized = true;
+    onCameraInitialized();
   }
 
   Future<void> initializeFaceDetection() async {
     try {
-      final options = FaceDetectorOptions(
-        enableContours: false,
-        enableClassification: false,
-        enableLandmarks: false,
-        enableTracking: false,
+      _faceDetector = FaceDetector(options: FaceDetectorOptions(
+        enableContours: false, enableClassification: true,
+        enableLandmarks: false, enableTracking: false,
         minFaceSize: 0.1,
-        performanceMode: FaceDetectorMode.fast,
-      );
-      
-      _faceDetector = FaceDetector(options: options);
+        performanceMode: FaceDetectorMode.fast));
       _faceDetectionInitialized = true;
       _lastFaceDetectedTime = DateTime.now();
-      if (kDebugMode) {
-        print('👤 Face detection initialized successfully');
-      }
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Face detection initialization failed: $e');
-      }
+      if (kDebugMode) print('Face detection init failed: $e');
       _faceDetectionInitialized = false;
     }
   }
 
-  void setAudioSpeechManager(AudioSpeechManager audioManager) {
-    _audioSpeechManager = audioManager;
-  }
+  void setAudioSpeechManager(AudioSpeechManager audio) => _audio = audio;
 
   void startFaceDetection() {
+    if (_disposed) return;
     if (!_faceDetectionInitialized) {
       initializeFaceDetection().then((_) {
-        if (_faceDetectionInitialized) {
-          _startFaceDetectionInternal();
-        }
+        if (_faceDetectionInitialized && !_disposed) _startInternal();
       });
     } else {
-      _startFaceDetectionInternal();
+      _startInternal();
     }
   }
 
   void stopFaceDetection() {
-    if (kDebugMode) {
-      print('👤 Stopping face detection');
-    }
     _faceDetectionTimer?.cancel();
+    _processingTimer?.cancel();
     _noFaceWarningTimer?.cancel();
-    _faceDetectionProcessingTimer?.cancel();
-    
     _showingFaceWarning = false;
-    _faceDetected = false;
+    _faceDetected       = false;
     onFaceDetectionChange(false);
     onFaceWarning(false);
   }
 
   void stopAll() {
+    _disposed = true;
     stopFaceDetection();
+  }
+
+  void resetForNewQuestion() {
+    _noFaceWarningCount    = 0;
+    _eyeContactFrames      = 0;
+    _totalDetectionFrames  = 0;
+    _eyeContactScore       = 100.0;
+    _showingFaceWarning    = false;
+    _faceWarningTtsPlaying = false;
+    onFaceWarning(false);
+  }
+
+  void dispose() {
+    _disposed = true;
+    stopFaceDetection();
+    if (_cameraInitialized) {
+      try { _cameraController.dispose(); } catch (_) {}
+    }
+    if (_faceDetectionInitialized) {
+      try { _faceDetector.close(); } catch (_) {}
+    }
   }
 
   Widget getCameraPreview() {
@@ -177,183 +142,93 @@ class CameraFaceManager {
     return Container(color: Colors.black);
   }
 
-  void resetForNewQuestion() {
-    _noFaceWarningCount = 0;
-    _showingFaceWarning = false;
-    _faceWarningTtsPlaying = false;
-    onFaceWarning(false);
-  }
-
-  void dispose() {
-    if (kDebugMode) {
-      print('🧹 Disposing CameraFaceManager');
-    }
-    
-    if (_cameraInitialized) {
-      _cameraController.dispose();
-    }
-    
-    if (_faceDetectionInitialized) {
-      _faceDetector.close();
-    }
-    
-    stopFaceDetection();
-    
-    if (kDebugMode) {
-      print('🧹 CameraFaceManager disposed successfully');
-    }
-  }
-
-  // Getters for state
-  bool get faceDetected => _faceDetected;
-  bool get showingFaceWarning => _showingFaceWarning;
+  bool get faceDetected        => _faceDetected;
+  bool get showingFaceWarning  => _showingFaceWarning;
   bool get faceWarningTtsPlaying => _faceWarningTtsPlaying;
-  int get noFaceWarningCount => _noFaceWarningCount;
-  bool get cameraInitialized => _cameraInitialized;
+  int    get noFaceWarningCount  => _noFaceWarningCount;
+  double get eyeContactScore      => _eyeContactScore;
+  int    get eyeContactFrames     => _eyeContactFrames;
+  int    get totalDetectionFrames => _totalDetectionFrames;
+  bool get cameraInitialized   => _cameraInitialized;
 
-  // Private implementation methods
-  void _startFaceDetectionInternal() {
-    if (!_faceDetectionInitialized) return;
-    
-    if (kDebugMode) {
-      print('👤 Starting face detection monitoring');
-    }
+  // ── Internal ─────────────────────────────────────────────────
+
+  void _startInternal() {
+    if (_disposed) return;
     _lastFaceDetectedTime = DateTime.now();
-    _noFaceWarningCount = 0;
-    
-    // Start face detection timer - checks every 2 seconds
-    _faceDetectionTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+    _noFaceWarningCount   = 0;
+
+    _faceDetectionTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_disposed) { _faceDetectionTimer?.cancel(); return; }
       _checkFaceDetection();
     });
-    
-    // Start processing camera frames for face detection
-    _faceDetectionProcessingTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
-      if (_isProcessingImage) {
-        return;
-      }
-      
-      _processCameraFrameForFaceDetection();
+
+    _processingTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (_disposed) { _processingTimer?.cancel(); return; }
+      if (!_isProcessingImage) _processFrame();
     });
   }
 
-  Future<void> _processCameraFrameForFaceDetection() async {
-    if (!_faceDetectionInitialized || 
-        !_cameraInitialized || 
-        !_cameraController.value.isInitialized ||
-        _isProcessingImage) {
-      return;
-    }
+  Future<void> _processFrame() async {
+    if (_disposed || !_cameraInitialized) return;
+    if (_isProcessingImage) return;
+    if (!_cameraController.value.isInitialized) return;
 
     _isProcessingImage = true;
-    
     try {
-      final image = await _cameraController.takePicture();
-      final inputImage = InputImage.fromFilePath(image.path);
-      
-      final faces = await _faceDetector.processImage(inputImage);
-      
-      if (faces.isNotEmpty) {
-        // Face detected!
+      final xfile     = await _cameraController.takePicture();
+      final inputImg  = InputImage.fromFilePath(xfile.path);
+      final faces     = await _faceDetector.processImage(inputImg);
+      final detected  = faces.isNotEmpty;
+
+      if (detected != _faceDetected) {
+        _faceDetected = detected;
+        onFaceDetectionChange(_faceDetected);
+      }
+      if (detected && faces.isNotEmpty) {
         _lastFaceDetectedTime = DateTime.now();
-        if (!_faceDetected) {
-          if (kDebugMode) {
-            print('👤 ✅ Face detected!');
-          }
-          _faceDetected = true;
-          onFaceDetectionChange(true);
-          
-          // Hide face warning if it was showing
-          if (_showingFaceWarning) {
-            _showingFaceWarning = false;
-            onFaceWarning(false);
-            _noFaceWarningTimer?.cancel();
-          }
+        if (_showingFaceWarning) {
+          _showingFaceWarning = false;
+          onFaceWarning(false);
         }
-      } else {
-        // No face detected
-        if (_faceDetected) {
-          if (kDebugMode) {
-            print('👤 ❌ Face lost');
-          }
-          _faceDetected = false;
-          onFaceDetectionChange(false);
+        // Eye contact tracking
+        final face = faces.first;
+        final leftEye  = face.leftEyeOpenProbability  ?? 1.0;
+        final rightEye = face.rightEyeOpenProbability ?? 1.0;
+        final eyesOpen = leftEye > 0.4 && rightEye > 0.4;
+        _totalDetectionFrames++;
+        if (eyesOpen) _eyeContactFrames++;
+        // Update rolling eye contact score
+        if (_totalDetectionFrames > 0) {
+          _eyeContactScore = (_eyeContactFrames / _totalDetectionFrames) * 100.0;
         }
       }
+      try { await File(xfile.path).delete(); } catch (_) {}
+    } on CameraException catch (_) {
+      _disposed = true;
+      _faceDetectionTimer?.cancel();
+      _processingTimer?.cancel();
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Face detection processing error: $e');
-      }
+      if (kDebugMode) print('Face detection error: $e');
     } finally {
       _isProcessingImage = false;
     }
   }
 
   void _checkFaceDetection() {
-    if (_lastFaceDetectedTime == null || _faceWarningTtsPlaying) return;
-    
-    final timeSinceLastFace = DateTime.now().difference(_lastFaceDetectedTime!);
-    
-    if (timeSinceLastFace.inSeconds >= 6) {
-      if (kDebugMode) {
-        print('👤 ⚠️ No face detected for ${timeSinceLastFace.inSeconds} seconds');
-      }
-      _triggerFaceWarning();
+    if (_disposed || _lastFaceDetectedTime == null) return;
+    final secs = DateTime.now().difference(_lastFaceDetectedTime!).inSeconds;
+    if (kDebugMode && secs > 0 && secs % 30 == 0) {
+      print('No face detected for $secs seconds');
     }
-  }
-
-  void _triggerFaceWarning() {
-    if (_showingFaceWarning || _faceWarningTtsPlaying) {
-      return; // Already showing warning or TTS is playing
-    }
-    
-    if (kDebugMode) {
-      print('👤 🚨 Triggering face detection warning');
-    }
-    
-    _showingFaceWarning = true;
-    onFaceWarning(true);
-    _faceWarningTtsPlaying = true;
-    
-    // Select a random warning message
-    final randomMessage = _faceWarningMessages[_noFaceWarningCount % _faceWarningMessages.length];
-    _noFaceWarningCount++;
-    
-    // Play TTS warning
-    _playFaceWarningTTS(randomMessage);
-    
-    // Auto-hide warning after 4 seconds
-    _noFaceWarningTimer = Timer(const Duration(seconds: 4), () {
-      if (_showingFaceWarning) {
-        _showingFaceWarning = false;
-        onFaceWarning(false);
-      }
-    });
-  }
-
-  Future<void> _playFaceWarningTTS(String message) async {
-    try {
-      if (kDebugMode) {
-        print('👤 🔊 Playing face warning TTS: $message');
-      }
-      
-      if (_audioSpeechManager != null) {
-        await _audioSpeechManager!.speakFaceWarning(message);
-      } else {
-        if (kDebugMode) {
-          print('👤 ⚠️ No audio manager available for face warning TTS');
-        }
-      }
-      
-      // Reset flag after warning
-      Timer(const Duration(seconds: 3), () {
-        _faceWarningTtsPlaying = false;
-      });
-      
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Face warning TTS error: $e');
-      }
-      _faceWarningTtsPlaying = false;
+    if (!_faceDetected && secs > 10 && !_showingFaceWarning) {
+      _showingFaceWarning = true;
+      _noFaceWarningCount++;
+      onFaceWarning(true);
+    } else if (_faceDetected && _showingFaceWarning) {
+      _showingFaceWarning = false;
+      onFaceWarning(false);
     }
   }
 }
+

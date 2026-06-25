@@ -1,4 +1,4 @@
-import 'package:speech_to_text/speech_to_text.dart';
+﻿import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
@@ -26,13 +26,19 @@ class AudioSpeechManager {
   late http.Client _httpClient;
   bool _useAzureTTS = true;
   bool _azureTTSAvailable = false;
-  bool _speechAvailable = false;
+  bool _speechAvailable   = false;
+  bool _shouldBeListening = false;
+  bool _isRestarting    = false;
+  String _accumulatedTranscript = '';
 
   // TTS state
   bool _faceWarningTtsPlaying = false;
+  bool _ttsPlaying = false;
 
   // Speech monitoring
   Timer? _speechMonitorTimer;
+  Timer? _audioTimeoutTimer;
+  bool _disposed = false;
   String _lastTranscriptSnapshot = '';
 
   AudioSpeechManager({
@@ -46,14 +52,14 @@ class AudioSpeechManager {
     _audioPlayer = AudioPlayer();
     
     // Validate Azure configuration
-    print('🔊 Azure TTS Configuration:');
-    print('🔊 Region: $region');
-    print('🔊 TTS URL: $ttsUrl');
-    print('🔊 Subscription Key Length: ${subscriptionKey.length}');
-    print('🔊 Key Preview: ${subscriptionKey.substring(0, 8)}***');
+    print('ðŸ”Š Azure TTS Configuration:');
+    print('ðŸ”Š Region: $region');
+    print('ðŸ”Š TTS URL: $ttsUrl');
+    print('ðŸ”Š Subscription Key Length: ${subscriptionKey.length}');
+    print('ðŸ”Š Key Preview: ${subscriptionKey.substring(0, 8)}***');
     
     if (subscriptionKey.length != 32) {
-      print('🔊 ⚠️ WARNING: Subscription key length is ${subscriptionKey.length}, expected 32 characters');
+      print('ðŸ”Š âš ï¸ WARNING: Subscription key length is ${subscriptionKey.length}, expected 32 characters');
     }
   }
 
@@ -65,19 +71,21 @@ class AudioSpeechManager {
   }
 
   Future<void> speakQuestion(String question) async {
-    print('🔊 Speaking question: ${question.substring(0, question.length > 50 ? 50 : question.length)}...');
+    stopListening();
+    _ttsPlaying = true;
+    print('ðŸ”Š Speaking question: ${question.substring(0, question.length > 50 ? 50 : question.length)}...');
     
     bool ttsSuccessful = false;
     
     // Try Azure TTS first
     if (_useAzureTTS && _azureTTSAvailable) {
       try {
-        print('🔊 Attempting Azure TTS with JennyNeural voice');
+        print('ðŸ”Š Attempting Azure TTS with JennyNeural voice');
         await _speakWithAzure(question);
         ttsSuccessful = true;
-        print('🔊 ✅ Azure TTS completed successfully');
+        print('ðŸ”Š âœ… Azure TTS completed successfully');
       } catch (e) {
-        print('🔊 ❌ Azure TTS failed: $e');
+        print('ðŸ”Š âŒ Azure TTS failed: $e');
         _azureTTSAvailable = false; // Disable for this session
       }
     }
@@ -85,25 +93,26 @@ class AudioSpeechManager {
     // Fallback to system TTS if Azure failed
     if (!ttsSuccessful) {
       try {
-        print('🔊 Using fallback system TTS');
+        print('ðŸ”Š Using fallback system TTS');
         await _speakWithFallback(question);
         ttsSuccessful = true;
-        print('🔊 ✅ Fallback TTS completed successfully');
+        print('ðŸ”Š âœ… Fallback TTS completed successfully');
       } catch (fallbackError) {
-        print('🔊 ❌ Fallback TTS also failed: $fallbackError');
+        print('ðŸ”Š âŒ Fallback TTS also failed: $fallbackError');
       }
     }
     
     // If both TTS methods fail, still continue the interview
     if (!ttsSuccessful) {
-      print('🔊 ⚠️ All TTS methods failed - continuing without audio');
+      print('ðŸ”Š âš ï¸ All TTS methods failed - continuing without audio');
       onTTSComplete();
     }
   }
 
   Future<void> speakFaceWarning(String message) async {
+    stopListening();
     try {
-      print('👤 🔊 Playing face warning TTS: $message');
+      print('ðŸ‘¤ ðŸ”Š Playing face warning TTS: $message');
       
       _faceWarningTtsPlaying = true;
       bool ttsSuccessful = false;
@@ -114,7 +123,7 @@ class AudioSpeechManager {
           await _speakWithAzure(message, isWarning: true);
           ttsSuccessful = true;
         } catch (e) {
-          print('❌ Azure TTS failed for face warning: $e');
+          print('âŒ Azure TTS failed for face warning: $e');
           _azureTTSAvailable = false; // Disable for this session
         }
       }
@@ -130,113 +139,83 @@ class AudioSpeechManager {
       });
       
     } catch (e) {
-      print('❌ Face warning TTS error: $e');
+      print('âŒ Face warning TTS error: $e');
       _faceWarningTtsPlaying = false;
     }
   }
 
   void startListening() {
-    if (!_speechToText.isAvailable || !_speechAvailable) {
-      print('Speech recognition not available');
-      return;
-    }
-    
-    print('🎤 Starting speech recognition...');
-    
-    try {
-      _speechToText.listen(
-        onResult: (result) {
-          if (result.recognizedWords.isNotEmpty || result.hasConfidenceRating) {
-            print('✅ Valid speech result: ${result.recognizedWords} (confidence: ${result.confidence})');
-            onSpeechResult(result.recognizedWords, result.finalResult);
-          }
-        },
-        onSoundLevelChange: (level) {
-          if (level > 0.2) {
-            print('🔊 Sound detected: $level');
-          }
-        },
-        listenFor: const Duration(seconds: 35),
-        pauseFor: const Duration(seconds: 60),
-        partialResults: true,
-        cancelOnError: false,
-        listenMode: ListenMode.search,
-        sampleRate: 16000,
-        onDevice: false,
-        localeId: 'en_US',
-      );
-      
-      _startSpeechMonitoring();
-      
-    } catch (e) {
-      print('❌ Speech recognition setup error: $e');
-      onSpeechError(e.toString());
-    }
+    if (!_speechToText.isAvailable || !_speechAvailable) return;
+    _shouldBeListening     = true;
+    _accumulatedTranscript = '';
+    _isRestarting          = false;
+    _doListen();
+  }
+
+  void _doListen() {
+    if (_disposed || !_shouldBeListening || _ttsPlaying || _isRestarting) return;
+    if (_speechToText.isListening) return;
+    _isRestarting = true;
+    Future.delayed(const Duration(milliseconds: 100), () async {
+      _isRestarting = false;
+      if (_disposed || !_shouldBeListening || _ttsPlaying) return;
+      try {
+        await _speechToText.listen(
+          onResult: (result) {
+            if (result.recognizedWords.isNotEmpty) {
+              final words = result.recognizedWords.trim();
+              if (result.finalResult) {
+                _accumulatedTranscript = (_accumulatedTranscript + ' ' + words).trim();
+                onSpeechResult(_accumulatedTranscript, true);
+              } else {
+                onSpeechResult((_accumulatedTranscript + ' ' + words).trim(), false);
+              }
+            }
+          },
+          onSoundLevelChange: (_) {},
+          listenFor: const Duration(seconds: 20),
+          pauseFor:  const Duration(seconds: 20),
+          partialResults: true,
+          cancelOnError: false,
+          listenMode: ListenMode.dictation,
+          localeId: 'en_ZA',
+        );
+      } catch (_) {}
+    });
   }
 
   void stopListening() {
-    try {
-      if (_speechToText.isListening) {
-        _speechToText.stop();
-      }
-    } catch (e) {
-      print('Error stopping speech recognition: $e');
-    }
-    
+    _shouldBeListening     = false;
+    _accumulatedTranscript = '';
+    _isRestarting          = false;
     _speechMonitorTimer?.cancel();
+    try { if (_speechToText.isListening) _speechToText.stop(); } catch (_) {}
   }
-
-  void stopAll() {
-    stopListening();
-    
-    try {
-      _audioPlayer.stop();
-    } catch (e) {
-      print('Error stopping audio player: $e');
-    }
-    
-    _speechMonitorTimer?.cancel();
-  }
-
-  void dispose() {
-    print('🧹 Disposing AudioSpeechManager');
-    
-    stopAll();
-    _audioPlayer.dispose();
-    _httpClient.close();
-    
-    print('🧹 AudioSpeechManager disposed successfully');
-  }
-
-  // Getters for state
-  bool get faceWarningTtsPlaying => _faceWarningTtsPlaying;
-
-  // Private implementation methods
 
   // Azure TTS Methods
   Future<void> _initializeAzureTTS() async {
     try {
-      print('🔊 Initializing Azure TTS...');
-      print('🔊 Region: $region');
-      print('🔊 TTS URL: $ttsUrl');
-      print('🔊 Subscription Key: ${subscriptionKey.substring(0, 8)}...');
+      print('ðŸ”Š Initializing Azure TTS...');
+      print('ðŸ”Š Region: $region');
+      print('ðŸ”Š TTS URL: $ttsUrl');
+      print('ðŸ”Š Subscription Key: ${subscriptionKey.substring(0, 8)}...');
       
       // Test with a simple TTS request instead of HEAD
       await _testAzureWithSimpleTTS();
       
       _azureTTSAvailable = true;
-      print('🔊 ✅ Azure TTS initialized successfully');
+      print('ðŸ”Š âœ… Azure TTS initialized successfully');
     } catch (e) {
-      print('🔊 ❌ Azure TTS initialization failed: $e');
+      print('ðŸ”Š âŒ Azure TTS initialization failed: $e');
       _azureTTSAvailable = false;
       _useAzureTTS = false;
-      print('🔊 Falling back to system TTS');
+      print('ðŸ”Š Falling back to system TTS');
     }
   }
 
   Future<void> _testAzureWithSimpleTTS() async {
     try {
-      print('🔊 Testing Azure TTS with JennyNeural voice...');
+      print('ðŸ”Š Testing Azure TTS with JennyNeural voice...');
       
       final testSSML = '''
 <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US" xmlns:mstts="https://www.w3.org/2001/mstts">
@@ -260,16 +239,16 @@ class AudioSpeechManager {
         body: testSSML,
       ).timeout(const Duration(seconds: 10));
 
-      print('🔊 Test response status: ${response.statusCode}');
+      print('ðŸ”Š Test response status: ${response.statusCode}');
       if (response.statusCode == 200) {
-        print('🔊 Azure TTS test successful (${response.bodyBytes.length} bytes received)');
+        print('ðŸ”Š Azure TTS test successful (${response.bodyBytes.length} bytes received)');
       } else {
-        print('🔊 Azure TTS test failed: ${response.statusCode}');
-        print('🔊 Response body: ${response.body}');
+        print('ðŸ”Š Azure TTS test failed: ${response.statusCode}');
+        print('ðŸ”Š Response body: ${response.body}');
         throw Exception('Azure TTS test failed: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
-      print('🔊 Azure TTS test exception: $e');
+      print('ðŸ”Š Azure TTS test exception: $e');
       throw Exception('Azure TTS test failed: $e');
     }
   }
@@ -280,11 +259,11 @@ class AudioSpeechManager {
     }
 
     try {
-      print('🔊 Speaking with Azure TTS: ${text.length} characters');
+      print('ðŸ”Š Speaking with Azure TTS: ${text.length} characters');
       
       // Create SSML for JennyNeural voice with enhanced settings
       final ssml = _createSSMLForJenny(text, isWarning: isWarning);
-      print('🔊 SSML created: ${ssml.substring(0, 100)}...');
+      print('ðŸ”Š SSML created: ${ssml.substring(0, 100)}...');
       
       final response = await _httpClient.post(
         Uri.parse(ttsUrl),
@@ -297,23 +276,23 @@ class AudioSpeechManager {
         body: ssml,
       ).timeout(const Duration(seconds: 15));
 
-      print('🔊 Azure TTS response: ${response.statusCode}');
+      print('ðŸ”Š Azure TTS response: ${response.statusCode}');
       
       if (response.statusCode == 200) {
-        print('🔊 ✅ Azure TTS response received (${response.bodyBytes.length} bytes)');
+        print('ðŸ”Š âœ… Azure TTS response received (${response.bodyBytes.length} bytes)');
         if (response.bodyBytes.length > 1000) { // Ensure we have a reasonable audio file
           await _playAudioFromBytes(response.bodyBytes);
         } else {
           throw Exception('Audio response too small: ${response.bodyBytes.length} bytes');
         }
       } else {
-        print('🔊 ❌ Azure TTS error: ${response.statusCode}');
-        print('🔊 Response headers: ${response.headers}');
-        print('🔊 Response body: ${response.body}');
+        print('ðŸ”Š âŒ Azure TTS error: ${response.statusCode}');
+        print('ðŸ”Š Response headers: ${response.headers}');
+        print('ðŸ”Š Response body: ${response.body}');
         throw Exception('Azure TTS request failed: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
-      print('🔊 ❌ Azure TTS error: $e');
+      print('ðŸ”Š âŒ Azure TTS error: $e');
       rethrow;
     }
   }
@@ -331,7 +310,7 @@ class AudioSpeechManager {
         .replaceAll('\r', ' ')
         .replaceAll(RegExp(r'\s+'), ' '); // Replace multiple spaces with single space
 
-    print('🔊 Creating SSML for JennyNeural voice: ${cleanText.substring(0, cleanText.length > 100 ? 100 : cleanText.length)}...');
+    print('ðŸ”Š Creating SSML for JennyNeural voice: ${cleanText.substring(0, cleanText.length > 100 ? 100 : cleanText.length)}...');
 
     // Enhance text for natural speech patterns
     String enhancedText = _enhanceTextForNaturalSpeech(cleanText, isWarning);
@@ -404,7 +383,7 @@ class AudioSpeechManager {
       final tempFile = File('${tempDir.path}/tts_audio_${DateTime.now().millisecondsSinceEpoch}.mp3');
       await tempFile.writeAsBytes(audioBytes);
       
-      print('🔊 Audio file saved: ${tempFile.path} (${audioBytes.length} bytes)');
+      print('ðŸ”Š Audio file saved: ${tempFile.path} (${audioBytes.length} bytes)');
       
       // Stop any currently playing audio
       await _audioPlayer.stop();
@@ -414,7 +393,7 @@ class AudioSpeechManager {
       StreamSubscription? stateSubscription;
       
       completionSubscription = _audioPlayer.onPlayerComplete.listen((_) {
-        print('🔊 ✅ Azure TTS playback completed');
+        print('ðŸ”Š âœ… Azure TTS playback completed');
         _onTTSCompleteInternal();
         
         // Clean up subscriptions
@@ -429,21 +408,22 @@ class AudioSpeechManager {
 
       // Set up state change callback for error handling
       stateSubscription = _audioPlayer.onPlayerStateChanged.listen((state) {
-        print('🔊 Audio player state: $state');
+        print('ðŸ”Š Audio player state: $state');
         if (state == PlayerState.stopped && completionSubscription != null) {
-          print('🔊 Audio player stopped unexpectedly');
+          print('ðŸ”Š Audio player stopped unexpectedly');
         }
       });
 
       // Play the audio
-      print('🔊 Starting audio playback...');
+      print('ðŸ”Š Starting audio playback...');
       await _audioPlayer.play(DeviceFileSource(tempFile.path));
-      print('🔊 Audio play command sent');
+      print('ðŸ”Š Audio play command sent');
       
-      // Set a timeout in case completion handler never fires
-      Timer(const Duration(seconds: 30), () {
+      // Store timeout so dispose() can cancel it
+      _audioTimeoutTimer?.cancel();
+      _audioTimeoutTimer = Timer(const Duration(seconds: 30), () {
         if (completionSubscription != null) {
-          print('🔊 ⚠️ Audio playback timeout - forcing completion');
+          print('ðŸ”Š âš ï¸ Audio playback timeout - forcing completion');
           completionSubscription?.cancel();
           stateSubscription?.cancel();
           _onTTSCompleteInternal();
@@ -454,7 +434,7 @@ class AudioSpeechManager {
       });
       
     } catch (e) {
-      print('🔊 ❌ Error playing audio: $e');
+      print('ðŸ”Š âŒ Error playing audio: $e');
       // Still call completion to continue the flow
       _onTTSCompleteInternal();
       rethrow;
@@ -462,8 +442,10 @@ class AudioSpeechManager {
   }
 
   void _onTTSCompleteInternal() {
+    if (_disposed) return;
+    _ttsPlaying = false;
     if (!_faceWarningTtsPlaying) { // Only trigger countdown if not a face warning
-      print('🔊 TTS COMPLETION - CALLING CALLBACK');
+      print('ðŸ”Š TTS COMPLETION - CALLING CALLBACK');
       onTTSComplete();
     }
   }
@@ -480,14 +462,14 @@ class AudioSpeechManager {
     
     _flutterTts.setCompletionHandler(() {
       if (!_faceWarningTtsPlaying) { // Only trigger countdown if not a face warning
-        print('🔊 FALLBACK TTS COMPLETION HANDLER CALLED');
+        print('ðŸ”Š FALLBACK TTS COMPLETION HANDLER CALLED');
         onTTSComplete();
       }
     });
     
     _flutterTts.setErrorHandler((msg) {
       if (!_faceWarningTtsPlaying) { // Only trigger countdown if not a face warning
-        print('🔊 FALLBACK TTS ERROR: $msg - STARTING COUNTDOWN ANYWAY');
+        print('ðŸ”Š FALLBACK TTS ERROR: $msg - STARTING COUNTDOWN ANYWAY');
         onTTSComplete();
       }
     });
@@ -516,7 +498,7 @@ class AudioSpeechManager {
       }
       
     } catch (e) {
-      print('❌ Fallback TTS error: $e');
+      print('âŒ Fallback TTS error: $e');
       throw e;
     }
   }
@@ -541,17 +523,20 @@ class AudioSpeechManager {
                              errorMsg.contains('aborted');
         
         if (!isSilenceError) {
-          print('⚠️ Speech recognition technical error: ${val.errorMsg}');
+          print('âš ï¸ Speech recognition technical error: ${val.errorMsg}');
           onSpeechError(val.errorMsg);
         } else {
-          print('✅ Filtered silence/network error: ${val.errorMsg}');
+          print('âœ… Filtered silence/network error: ${val.errorMsg}');
         }
         
-        print('🛡️ Speech error handled - recording continues normally');
+        print('ðŸ›¡ï¸ Speech error handled - recording continues normally');
       },
       onStatus: (val) {
-        print('Speech recognition status: $val');
         onSpeechStatusChange(val);
+        if ((val == 'done' || val == 'notListening') &&
+            _shouldBeListening && !_ttsPlaying && !_disposed) {
+          Future.delayed(const Duration(milliseconds: 100), _doListen);
+        }
       },
       debugLogging: false,
     );
@@ -568,45 +553,31 @@ class AudioSpeechManager {
     }
   }
 
-  void _startSpeechMonitoring() {
-    _speechMonitorTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      print('🔍 Monitoring speech recognition - Status: ${_speechToText.isListening ? "listening" : "not listening"}');
-      
-      if (!_speechToText.isListening) {
-        print('🔄 Speech recognition stopped unexpectedly - RESTARTING...');
-        _restartSpeechRecognition();
-      }
-    });
+
+
+
+
+
+
+
+
+  void stopAll() {
+    _speechMonitorTimer?.cancel();
+    _speechMonitorTimer = null;
+    _audioTimeoutTimer?.cancel();
+    _shouldBeListening = false;
+    _isRestarting      = false;
+    try { _flutterTts.stop(); } catch (_) {}
+    try { if (_speechToText.isListening) _speechToText.stop(); } catch (_) {}
+    try { _audioPlayer.stop(); } catch (_) {}
   }
 
-  void _restartSpeechRecognition() {
-    print('🔄 Restarting speech recognition...');
-    
-    try {
-      _speechToText.listen(
-        onResult: (result) {
-          if (result.recognizedWords.isNotEmpty || result.hasConfidenceRating) {
-            print('✅ Restarted speech result: ${result.recognizedWords}');
-            onSpeechResult(result.recognizedWords, result.finalResult);
-          }
-        },
-        onSoundLevelChange: (level) {
-          if (level > 0.2) {
-            print('🔊 Restarted sound: $level');
-          }
-        },
-        listenFor: const Duration(seconds: 35),
-        pauseFor: const Duration(seconds: 60),
-        partialResults: true,
-        cancelOnError: false,
-        listenMode: ListenMode.search,
-        sampleRate: 16000,
-        onDevice: false,
-        localeId: 'en_US',
-      );
-    } catch (e) {
-      print('❌ Error restarting speech recognition: $e');
-      onSpeechError(e.toString());
-    }
+  void dispose() {
+    _disposed = true;
+    stopAll();
+    try { _audioPlayer.dispose(); } catch (_) {}
+    try { _httpClient.close(); } catch (_) {}
   }
 }
+
+

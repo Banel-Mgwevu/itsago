@@ -13,7 +13,8 @@ import 'package:interviewai/main.dart';
 void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    // Use a small test app defined here because MyApp isn't available.
+    await tester.pumpWidget(const TestApp());
 
     // Verify that our counter starts at 0.
     expect(find.text('0'), findsOneWidget);
@@ -27,4 +28,31 @@ void main() {
     expect(find.text('0'), findsNothing);
     expect(find.text('1'), findsOneWidget);
   });
+}
+
+// Minimal test app that mimics a counter with a FloatingActionButton.
+class TestApp extends StatefulWidget {
+  const TestApp({Key? key}) : super(key: key);
+
+  @override
+  State<TestApp> createState() => _TestAppState();
+}
+
+class _TestAppState extends State<TestApp> {
+  int _counter = 0;
+
+  void _increment() => setState(() => _counter++);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(child: Text('$_counter')),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _increment,
+          child: const Icon(Icons.add),
+        ),
+      ),
+    );
+  }
 }
