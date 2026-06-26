@@ -23,7 +23,9 @@ import 'main.dart';
 import 'cv_library_screen.dart';
 import 'cloud_function_service.dart';
 import 'remote_config_service.dart';
+import 'purchase_service.dart';
 import 'review_service.dart';
+import 'notification_service.dart';
 
 enum _S { privacy, upload, processing, gapQA, generating, designPicker, download, success }
 
@@ -46,6 +48,23 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
 
   static const String _kClaudeModel  = 'claude-haiku-4-5-20251001';
   _S _state = _S.upload;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPurchases();
+    _init();
+  }
+
+  Future<void> _initPurchases() async {
+    final svc = PurchaseService();
+    svc.onPurchaseSuccess = () {
+      if (mounted) setState(() => _isPremium = true);
+    };
+    await svc.init();
+    if (mounted) setState(() => _isPremium = svc.isPremium);
+  }
+
   File?  _file;
   String _fileName = '';
   String _fileExt  = '';
@@ -58,13 +77,12 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   final TextEditingController _answerCtrl = TextEditingController();
   String _processingMsg = 'Reading your CV...';
   double _genProgress   = 0.0;
-  static const _designNames = ['EXECUTIVE', 'SPECTRUM', 'MINIMAL', 'GRID'];
+  static const _designNames = ['EXECUTIVE', 'SPECTRUM', 'MINIMAL', 'GRID', 'UBUNTU', 'VIVID'];
+  static const _premiumDesigns = {3, 4, 5};
   String? _docErrorType;
   int _savedCount = 0;
+  bool _isPremium = false;
   String? _docErrorMsg;
-
-  @override
-  void initState() { super.initState(); _init(); }
 
   static const _sessionKey = 'ats_last_session';
 
@@ -503,26 +521,26 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
           child: FractionallySizedBox(alignment: Alignment.centerLeft, widthFactor: _genProgress, child: Container(color: AppColors.blue))),
         const SizedBox(height: 8),
         Text('${(_genProgress * 100).toInt()}%', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.ink)),
-        const SizedBox(height: 24),
-        Row(mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(4, (i) {
+        Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 4,
+
+          children: List.generate(6, (i) {
             final done   = i < current;
             final active = i == current && _genProgress < 1.0;
             return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
                 color: done ? AppColors.blue : active ? AppColors.amber : AppColors.mist,
                 border: Border.all(color: AppColors.ink, width: 1)),
-              child: Text(_designNames[i], style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900,
+              child: Text(_designNames[i], style: TextStyle(fontSize: 7, fontWeight: FontWeight.w900,
                 color: done ? AppColors.white : AppColors.ink, letterSpacing: 0.5)));
           })),
       ])));
   }
 
   Widget _designPickerUI() {
-    final tags   = ['CORPORATE', 'CREATIVE', 'UNIVERSAL', 'TECH'];
-    final colors = [const Color(0xFF1C1C3A), const Color(0xFF2E4057), const Color(0xFF333333), AppColors.blue];
+    final tags   = ['CORPORATE', 'CREATIVE', 'UNIVERSAL', 'TECH', 'ENTRY LEVEL', 'CREATIVE'];
+    final colors = [const Color(0xFF1C1C3A), const Color(0xFF2E4057), const Color(0xFF333333), AppColors.blue, const Color(0xFF2D6A4F), const Color(0xFF6B2D8B)];
     return Column(children: [
       Container(width: double.infinity, padding: const EdgeInsets.all(16), color: Colors.white,
         child: Column(children: [
@@ -539,11 +557,19 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
 
 
 
-        itemCount: 4,
+        itemCount: 6,
         itemBuilder: (ctx, i) {
           final isSelected = _selectedDesign == i;
+          final isPremiumDesign = _premiumDesigns.contains(i);
+          final isLocked = isPremiumDesign && !_isPremium;
           return GestureDetector(
-            onTap: () => setState(() => _selectedDesign = i),
+            onTap: () {
+              if (isLocked) {
+                _showPremiumDialog();
+                return;
+              }
+              setState(() => _selectedDesign = i);
+            },
             child: Container(margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(color: Colors.white,
                 border: Border.all(color: isSelected ? AppColors.blue : AppColors.ink, width: isSelected ? 3 : 2)),
@@ -594,8 +620,76 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
       case 1: return _specCardPreview();
       case 2: return _minCardPreview();
       case 3: return _gridCardPreview();
+      case 4: return _ubuntuCardPreview();
+      case 5: return _vividCardPreview();
       default: return _execCardPreview();
     }
+  }
+
+  Widget _ubuntuCardPreview() {
+    const green = Color(0xFF2D6A4F);
+    const lightGreen = Color(0xFF52B788);
+    return Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: double.infinity, padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(border: Border(left: BorderSide(color: green, width: 4))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_s('name').toUpperCase(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 2)),
+          const SizedBox(height: 3),
+          if (_s('headline').isNotEmpty) Text(_s('headline'), style: TextStyle(fontSize: 11, color: green, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text([_s('email'), _s('phone')].where((v) => v.isNotEmpty).join('  .  '), style: TextStyle(fontSize: 9, color: Colors.grey[600])),
+        ])),
+      const SizedBox(height: 10),
+      Container(width: double.infinity, height: 1, color: lightGreen),
+      const SizedBox(height: 10),
+      if (_s('summary').isNotEmpty) ...[
+        Text('PROFILE', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: green, letterSpacing: 2)),
+        const SizedBox(height: 4),
+        Text(_s('summary'), maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, height: 1.5)),
+        const SizedBox(height: 8),
+      ],
+      if (_list('skills').isNotEmpty) ...[
+        Text('SKILLS', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: green, letterSpacing: 2)),
+        const SizedBox(height: 4),
+        Wrap(spacing: 6, runSpacing: 4, children: _list('skills').take(6).map((s) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          color: lightGreen.withOpacity(0.15),
+          child: Text(s, style: TextStyle(fontSize: 9, color: green, fontWeight: FontWeight.w600)))).toList()),
+      ],
+    ]));
+  }
+
+  Widget _vividCardPreview() {
+    const purple = Color(0xFF6B2D8B);
+    const pink = Color(0xFFE91E8C);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: double.infinity,
+        decoration: BoxDecoration(gradient: LinearGradient(colors: [purple, pink], begin: Alignment.centerLeft, end: Alignment.centerRight)),
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_s('name').toUpperCase(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
+          const SizedBox(height: 3),
+          if (_s('headline').isNotEmpty) Text(_s('headline'), style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w500)),
+          const SizedBox(height: 4),
+          Text([_s('email'), _s('phone')].where((v) => v.isNotEmpty).join('  .  '), style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.7))),
+        ])),
+      Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (_s('summary').isNotEmpty) ...[
+          Row(children: [Container(width: 16, height: 16, color: pink, child: const SizedBox()), const SizedBox(width: 6), Text('ABOUT ME', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: purple, letterSpacing: 2))]),
+          const SizedBox(height: 6),
+          Text(_s('summary'), maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, height: 1.5)),
+          const SizedBox(height: 10),
+        ],
+        if (_list('skills').isNotEmpty) ...[
+          Row(children: [Container(width: 16, height: 16, color: purple, child: const SizedBox()), const SizedBox(width: 6), Text('SKILLS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: purple, letterSpacing: 2))]),
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 4, children: _list('skills').take(6).map((s) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(border: Border.all(color: pink), borderRadius: BorderRadius.circular(12)),
+            child: Text(s, style: TextStyle(fontSize: 9, color: purple)))).toList()),
+        ],
+      ])),
+    ]);
   }
 
   Widget _execCardPreview() {
@@ -733,7 +827,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   }
 
   Widget _downloadUI() {
-    final labels   = ['Executive', 'Spectrum', 'Minimal', 'Grid'];
+    final labels   = ['Executive', 'Spectrum', 'Minimal', 'Grid', 'Ubuntu', 'Vivid'];
     final atsScore = _optimized['atsScore'];
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -1203,11 +1297,11 @@ Max 5 gaps. Return ONLY the JSON.''';
       await _optimizeWithAI();
       setState(() => _genProgress = 0.08);
       _pdfs.clear();
-      final gens = [_execDesign, _spectrumDesign, _minimalDesign, _gridDesign];
+      final gens = [_execDesign, _spectrumDesign, _minimalDesign, _gridDesign, _ubuntuDesign, _vividDesign];
       for (int i = 0; i < gens.length; i++) {
         try {
           _pdfs.add(await gens[i]());
-          setState(() => _genProgress = 0.08 + ((i + 1) / 4) * 0.92);
+          setState(() => _genProgress = 0.08 + ((i + 1) / 6) * 0.92);
           await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
           print('Design $i failed: $e');
@@ -1752,6 +1846,221 @@ Max 5 gaps. Return ONLY the JSON.''';
 
   }
 
+
+  Future<Uint8List> _ubuntuDesign() async {
+    const green = PdfColor.fromInt(0xFF2D6A4F);
+    const lightGreen = PdfColor.fromInt(0xFF52B788);
+    const dark = PdfColor.fromInt(0xFF1A1A1A);
+    const gray = PdfColor.fromInt(0xFF555555);
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(40),
+      build: (ctx) => [
+        pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Container(width: 4, height: 60, color: green),
+          pw.SizedBox(width: 12),
+          pw.Expanded(child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text(_s("name").toUpperCase(), style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: dark, letterSpacing: 2)),
+            pw.SizedBox(height: 4),
+            if (_s("headline").isNotEmpty) pw.Text(_s("headline"), style: pw.TextStyle(fontSize: 11, color: green, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 4),
+            pw.Text(_contact(), style: pw.TextStyle(fontSize: 9, color: gray)),
+          ])),
+        ]),
+        pw.SizedBox(height: 12),
+        pw.Container(width: double.infinity, height: 1.5, color: lightGreen),
+        pw.SizedBox(height: 16),
+        if (_s("summary").isNotEmpty) ...[
+          _ubuSec("PROFILE", green, lightGreen),
+          pw.SizedBox(height: 8),
+          pw.Text(_s("summary"), style: pw.TextStyle(fontSize: 10, color: dark, lineSpacing: 1.8)),
+          pw.SizedBox(height: 16),
+        ],
+        if (_list("skills").isNotEmpty) ...[
+          _ubuSec("SKILLS", green, lightGreen),
+          pw.SizedBox(height: 8),
+          pw.Wrap(spacing: 8, runSpacing: 6, children: _list("skills").map((s) => pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            color: PdfColor.fromInt(0xFFD8F3DC),
+            child: pw.Text(s, style: pw.TextStyle(fontSize: 9, color: green, fontWeight: pw.FontWeight.bold)))).toList()),
+          pw.SizedBox(height: 16),
+        ],
+        if (_exp().isNotEmpty) ...[
+          _ubuSec("EXPERIENCE", green, lightGreen),
+          pw.SizedBox(height: 10),
+          ..._exp().take(3).map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 10),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text(e["title"].toString(), style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: dark)),
+              pw.Text(e['company'].toString() + '  -  ' + e['duration'].toString(), style: pw.TextStyle(fontSize: 9, color: green, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 4),
+              ..._bullets(e).take(3).map((b) => pw.Text('-  ' + b, style: pw.TextStyle(fontSize: 9, color: dark, lineSpacing: 1.5))),
+            ]))),
+        ],
+        if (_edu().isNotEmpty) ...[
+          _ubuSec("EDUCATION", green, lightGreen),
+          pw.SizedBox(height: 8),
+          ..._edu().map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 8),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text(e["degree"].toString(), style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: dark)),
+              pw.Text(e['institution'].toString() + '  -  ' + e['year'].toString(), style: pw.TextStyle(fontSize: 9, color: green)),
+            ]))),
+        ],
+      ]));
+    return doc.save();
+  }
+
+  pw.Widget _ubuSec(String t, PdfColor green, PdfColor light) => pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+    pw.Row(children: [
+      pw.Container(width: 20, height: 3, color: green),
+      pw.SizedBox(width: 6),
+      pw.Text(t, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: green, letterSpacing: 2)),
+    ]),
+    pw.SizedBox(height: 4),
+    pw.Container(width: double.infinity, height: 0.5, color: light),
+  ]);
+
+  Future<Uint8List> _vividDesign() async {
+    const purple = PdfColor.fromInt(0xFF6B2D8B);
+    const pink = PdfColor.fromInt(0xFFE91E8C);
+    const dark = PdfColor.fromInt(0xFF1A1A1A);
+    const light = PdfColor.fromInt(0xFFF3E5F5);
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: pw.EdgeInsets.zero,
+      build: (ctx) => [
+        pw.Container(
+          width: double.infinity,
+          color: purple,
+          padding: const pw.EdgeInsets.all(28),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text(_s("name").toUpperCase(), style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.white, letterSpacing: 3)),
+            pw.SizedBox(height: 6),
+            if (_s("headline").isNotEmpty) pw.Text(_s("headline"), style: pw.TextStyle(fontSize: 11, color: PdfColor(1,1,1,0.8))),
+            pw.SizedBox(height: 8),
+            pw.Container(width: 60, height: 3, color: pink),
+            pw.SizedBox(height: 8),
+            pw.Text(_contact(), style: pw.TextStyle(fontSize: 9, color: PdfColor(1,1,1,0.7))),
+          ])),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(28),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            if (_s("summary").isNotEmpty) ...[
+              _vividSec("ABOUT ME", purple, pink),
+              pw.SizedBox(height: 8),
+              pw.Text(_s("summary"), style: pw.TextStyle(fontSize: 10, color: dark, lineSpacing: 1.8)),
+              pw.SizedBox(height: 16),
+            ],
+            if (_list("skills").isNotEmpty) ...[
+              _vividSec("SKILLS", purple, pink),
+              pw.SizedBox(height: 8),
+              pw.Wrap(spacing: 8, runSpacing: 6, children: _list("skills").map((s) => pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: pw.BoxDecoration(border: pw.Border.all(color: pink, width: 1)),
+                child: pw.Text(s, style: pw.TextStyle(fontSize: 9, color: purple)))).toList()),
+              pw.SizedBox(height: 16),
+            ],
+            if (_exp().isNotEmpty) ...[
+              _vividSec("EXPERIENCE", purple, pink),
+              pw.SizedBox(height: 10),
+              ..._exp().take(3).map((e) => pw.Container(
+                margin: const pw.EdgeInsets.only(bottom: 8),
+                padding: const pw.EdgeInsets.all(8),
+                color: light,
+                child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                  pw.Text(e["title"].toString(), style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: dark)),
+                  pw.Text(e['company'].toString() + '  -  ' + e['duration'].toString(), style: pw.TextStyle(fontSize: 9, color: pink, fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 4),
+                  ..._bullets(e).take(3).map((b) => pw.Text('-  ' + b, style: pw.TextStyle(fontSize: 9, color: dark, lineSpacing: 1.5))),
+                ]))),
+            ],
+            if (_edu().isNotEmpty) ...[
+              _vividSec("EDUCATION", purple, pink),
+              pw.SizedBox(height: 8),
+              ..._edu().map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 8),
+                child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                  pw.Text(e["degree"].toString(), style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: dark)),
+                  pw.Text(e['institution'].toString() + '  -  ' + e['year'].toString(), style: pw.TextStyle(fontSize: 9, color: purple)),
+                ]))),
+            ],
+          ])),
+      ]));
+    return doc.save();
+  }
+
+  pw.Widget _vividSec(String t, PdfColor purple, PdfColor pink) => pw.Row(children: [
+    pw.Container(width: 16, height: 16, color: pink),
+    pw.SizedBox(width: 8),
+    pw.Text(t, style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: purple, letterSpacing: 2)),
+  ]);
+  void _showPremiumDialog() {
+    showDialog(context: context, builder: (_) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black, width: 2),
+          boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: double.infinity, color: const Color(0xFF1C1C3A), padding: const EdgeInsets.all(16),
+            child: const Column(children: [
+              Icon(Icons.lock_open_rounded, color: Color(0xFFFFD700), size: 32),
+              SizedBox(height: 8),
+              Text('PREMIUM TEMPLATES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
+              SizedBox(height: 4),
+              Text('Unlock Grid, Ubuntu and Vivid', style: TextStyle(fontSize: 11, color: Colors.white70)),
+            ])),
+          Padding(padding: const EdgeInsets.all(20), child: Column(children: [
+            _premiumFeature(Icons.grid_view_rounded, 'Grid Template', 'Modern tech layout'),
+            _premiumFeature(Icons.eco_rounded, 'Ubuntu Template', 'Clean entry-level design'),
+            _premiumFeature(Icons.palette_rounded, 'Vivid Template', 'Bold creative design'),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              color: Color(0xFFFFD700),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Center(child: Text('LIMITED LAUNCH OFFER', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.black, letterSpacing: 2)))),
+            const SizedBox(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text('R59', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.grey, decoration: TextDecoration.lineThrough)),
+              const SizedBox(width: 12),
+              Text('R29', style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Color(0xFF1C1C3A))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('You save R30 - 50% off', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: () async {
+                Navigator.pop(context);
+                final svc = PurchaseService();
+                await svc.buyPremiumTemplates();
+              },
+              child: Container(width: double.infinity, height: 52,
+                decoration: BoxDecoration(color: const Color(0xFF1C1C3A), border: Border.all(color: Colors.black, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
+                child: const Center(child: Text('UNLOCK PREMIUM', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2))))),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () async {
+                Navigator.pop(context);
+                await PurchaseService().restorePurchases();
+              },
+              child: const Text('Restore purchase', style: TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.underline))),
+          ])),
+        ]))));
+  }
+
+  Widget _premiumFeature(IconData icon, String title, String sub) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(children: [
+      Icon(icon, color: const Color(0xFF1C1C3A), size: 20),
+      const SizedBox(width: 12),
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+        Text(sub, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      ]),
+    ]));
+
   Map<String, String> _hdrs() => {};
   Widget _stepChip(String num, String label) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2090,12 +2399,6 @@ class _ATSPreviewPage extends StatelessWidget {
     Text(t, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: b, letterSpacing: 1.5)),
   ]);
 }
-
-
-
-
-
-
 
 
 

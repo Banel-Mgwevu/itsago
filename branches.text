@@ -1,0 +1,12 @@
+main
+→ Your latest working code
+→ Always deployable
+
+stable-v1.0.3
+→ Snapshot of current working state
+→ Fall back here if anything breaks
+
+feature/premium-templates
+→ Build new templates here safely
+→ Main stays untouched
+→ Merge when ready
