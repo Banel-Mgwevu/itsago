@@ -1,11 +1,14 @@
-﻿import 'package:camera/camera.dart';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'purchase_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'main.dart';
 import 'terms_screen.dart';
+import 'privacy_policy_detail_screen.dart';
 import 'main_menu_screen.dart';
 import 'onboarding_screen.dart';
 
@@ -30,6 +33,7 @@ class _AuthScreenState extends State<AuthScreen>
       CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
 
   bool _loading = false;
+  bool _consentChecked = false;
   final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
   @override
@@ -49,7 +53,7 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Future<void> _signInGoogle() async {
-    if (_loading) return;
+    if (_loading || !_consentChecked) return;
     setState(() => _loading = true);
     try {
       final acct = await _googleSignIn.signIn();
@@ -58,6 +62,10 @@ class _AuthScreenState extends State<AuthScreen>
       await FirebaseAuth.instance.signInWithCredential(
         GoogleAuthProvider.credential(
           accessToken: auth.accessToken, idToken: auth.idToken));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('privacy_consent_accepted', true);
+      await prefs.setString(
+          'privacy_consent_accepted_at', DateTime.now().toIso8601String());
       await _navigate();
     } catch (_) {
       if (mounted) {
@@ -67,6 +75,12 @@ class _AuthScreenState extends State<AuthScreen>
       }
     }
   }
+
+  void _openPrivacyPolicy() => Navigator.of(context).push(PageRouteBuilder(
+    pageBuilder: (_, __, ___) => const PrivacyPolicyDetailScreen(),
+    transitionsBuilder: (_, a, __, child) =>
+        FadeTransition(opacity: a, child: child),
+    transitionDuration: const Duration(milliseconds: 400)));
 
   void _openTerms() => Navigator.of(context).push(PageRouteBuilder(
     pageBuilder: (_, __, ___) => TermsScreen(cameras: widget.cameras),
@@ -179,24 +193,54 @@ class _AuthScreenState extends State<AuthScreen>
                   'personalised coaching features.',
                   style: AppText.caption.copyWith(height: 1.5)),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
+
+                // Consent checkbox - must be ticked before sign-in works.
+                // Unchecked by default; tapping "Privacy Policy" opens the
+                // full detail without needing to leave this screen.
+                GestureDetector(
+                  onTap: () => setState(() => _consentChecked = !_consentChecked),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(width: 22, height: 22,
+                      margin: const EdgeInsets.only(top: 2),
+                      decoration: BoxDecoration(
+                        color: _consentChecked ? AppColors.ink : Colors.white,
+                        border: Border.all(color: AppColors.ink, width: 2)),
+                      child: _consentChecked
+                        ? const Icon(Icons.check_rounded, color: Colors.white, size: 15)
+                        : null),
+                    const SizedBox(width: 10),
+                    Expanded(child: RichText(text: TextSpan(
+                      style: AppText.caption.copyWith(height: 1.45, color: AppColors.ink),
+                      children: [
+                        const TextSpan(text: 'I agree to ITSAGO accessing my camera '
+                          'and microphone for practice interviews, as described in the '),
+                        TextSpan(text: 'Privacy Policy',
+                          style: const TextStyle(fontWeight: FontWeight.w800,
+                            color: AppColors.blue, decoration: TextDecoration.underline),
+                          recognizer: (TapGestureRecognizer()..onTap = _openPrivacyPolicy)),
+                        const TextSpan(text: '.'),
+                      ]))),
+                  ])),
+
+                const SizedBox(height: 20),
 
                 // Google sign-in button
                 GestureDetector(
-                  onTap: _loading ? null : _signInGoogle,
+                  onTap: (_loading || !_consentChecked) ? null : _signInGoogle,
                   child: Container(
                     width: double.infinity, height: 56,
                     decoration: BoxDecoration(
-                      color: _loading ? AppColors.dim : AppColors.white,
+                      color: (_loading || !_consentChecked) ? AppColors.dim : AppColors.white,
                       border: AppBorders.ink2,
-                      boxShadow: _loading
+                      boxShadow: (_loading || !_consentChecked)
                         ? null : const [AppShadows.hard4]),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                       Container(width: 32, height: 32,
                         decoration: BoxDecoration(
-                          color: _loading
+                          color: (_loading || !_consentChecked)
                             ? AppColors.dim
                             : const Color(0xFFEA4335),
                           border: Border.all(
@@ -209,7 +253,7 @@ class _AuthScreenState extends State<AuthScreen>
                       const SizedBox(width: 12),
                       Text('CONTINUE WITH GOOGLE',
                         style: AppText.button.copyWith(
-                          color: _loading
+                          color: (_loading || !_consentChecked)
                             ? Colors.white : AppColors.ink,
                           letterSpacing: 1.5)),
                     ]))),
@@ -229,31 +273,45 @@ class _AuthScreenState extends State<AuthScreen>
 
                 const SizedBox(height: 16),
 
-                Center(child: GestureDetector(
-                  onTap: _openTerms,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: AppColors.mist, width: 1.5)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.description_rounded,
-                        size: 13, color: AppColors.dim),
-                      const SizedBox(width: 8),
-                      Text('TERMS & CONDITIONS',
-                        style: AppText.label.copyWith(
-                          color: AppColors.dim,
-                          decoration: TextDecoration.underline)),
-                    ])))),
-
-                const SizedBox(height: 14),
-
-                Center(child: Text(
-                  'By signing in you agree to our Terms of Service\n'
-                  'and Privacy Policy.',
-                  style: AppText.caption.copyWith(height: 1.5),
-                  textAlign: TextAlign.center)),
+                Center(child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10, runSpacing: 8,
+                  children: [
+                    GestureDetector(
+                      onTap: _openTerms,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: AppColors.mist, width: 1.5)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.description_rounded,
+                            size: 13, color: AppColors.dim),
+                          const SizedBox(width: 8),
+                          Text('TERMS & CONDITIONS',
+                            style: AppText.label.copyWith(
+                              color: AppColors.dim,
+                              decoration: TextDecoration.underline)),
+                        ]))),
+                    GestureDetector(
+                      onTap: _openPrivacyPolicy,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: AppColors.mist, width: 1.5)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.privacy_tip_rounded,
+                            size: 13, color: AppColors.dim),
+                          const SizedBox(width: 8),
+                          Text('PRIVACY POLICY',
+                            style: AppText.label.copyWith(
+                              color: AppColors.dim,
+                              decoration: TextDecoration.underline)),
+                        ]))),
+                  ])),
               ]))))
       ])));
   }

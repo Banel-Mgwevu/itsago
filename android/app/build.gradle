@@ -19,8 +19,8 @@ android {
     defaultConfig {
         applicationId = "com.itsago.interviewai"
         minSdkVersion flutter.minSdkVersion
-        targetSdk = 35
-        versionCode = 35
+        targetSdk = 36
+        versionCode = 45
         versionName flutter.versionName
     }
     signingConfigs {

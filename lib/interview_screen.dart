@@ -29,6 +29,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
   String _transcript = '', _speechStatus = 'notListening';
   int    _recDuration = 0;
   bool   _showQuestion = true, _showCamera = false;
+  bool   _isExiting = false;
   int    _countdown = 5;
   bool   _countdownPaused = false, _cameraReady = false;
   bool   _showFinalCountdown = false; int _finalCountdown = 3;
@@ -121,14 +122,20 @@ class _InterviewScreenState extends State<InterviewScreen> {
   Future<bool> _onWillPop() async {
     _mgr.pauseInterviewTimer(true);
     final result = await _exitDialog() ?? false;
-    if (result) { _mgr.fillRemainingWithZero(); return true; }
+    if (result) {
+      setState(() => _isExiting = true);
+      await _mgr.fillRemainingWithZero();
+      return true;
+    }
     _mgr.pauseInterviewTimer(false);
     return false;
   }
   @override
   Widget build(BuildContext context) => WillPopScope(
     onWillPop: _onWillPop,
-    child: _showQuestion ? _questionScreen()
+    child: _isExiting
+         ? _loadingScreen(label: 'FINISHING UP YOUR\nLAST ANSWER...')
+         : _showQuestion ? _questionScreen()
          : _showCamera  ? _cameraScreen()
          : _loadingScreen());
 
@@ -385,10 +392,6 @@ class _InterviewScreenState extends State<InterviewScreen> {
                   : _emotion.contains('Nervous') ? AppColors.red
                   : AppColors.amber,
                 Icons.sentiment_satisfied_rounded),
-              const SizedBox(height: 10),
-              _analysisCard('${_fillers.length}', 'FILLERS',
-                _fillers.length <= 2 ? AppColors.blue : AppColors.red,
-                Icons.warning_rounded),
             ]))),
 
         if (_showSpeakPrompt && _isRecording)
@@ -437,7 +440,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
             child: _countdownWidget(_preCountdown, AppColors.blue, 'READY')),
 
         // Final countdown
-        if (_showFinalCountdown && _isRecording && _recDuration >= 17)
+        if (_showFinalCountdown && _isRecording && _recDuration >= 27)
           Positioned(left: 16, top: MediaQuery.of(context).size.height * 0.35,
             child: _countdownWidget(_finalCountdown, AppColors.red, 'TIME')),
 
@@ -699,7 +702,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
       ]));
 
   // ── LOADING SCREEN ─────────────────────────────────────
-  Widget _loadingScreen() => Scaffold(
+  Widget _loadingScreen({String label = 'PREPARING CAMERA...'}) => Scaffold(
     backgroundColor: AppColors.ink,
     body: Center(child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -712,9 +715,10 @@ class _InterviewScreenState extends State<InterviewScreen> {
         child: const CircularProgressIndicator(
           color: AppColors.amber, strokeWidth: 4)),
       const SizedBox(height: 24),
-      Text('PREPARING CAMERA...',
+      Text(label,
         style: AppText.title.copyWith(
-          color: Colors.white, letterSpacing: 2)),
+          color: Colors.white, letterSpacing: 2),
+        textAlign: TextAlign.center),
     ])));
 
   // ── EXIT DIALOG ────────────────────────────────────────

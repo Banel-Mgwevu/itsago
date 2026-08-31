@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'app_config.dart';
@@ -65,12 +65,13 @@ class _CompletionScreenState extends State<CompletionScreen>
       sb.write('{"overallSummary":"2-3 sentence honest assessment",');
       sb.write('"topStrength":"single biggest strength",');
       sb.write('"topImprovement":"single most important thing to work on",');
+      sb.write('"starUsage":"1-2 sentences: did their behavioural answers follow a clear Situation-Task-Action-Result structure? If they told stories with a situation and outcome, say so. If answers were vague with no clear example or result, say that and tell them to use STAR.",');
       sb.write('"questions":[{"qNum":1,"rating":"STRONG","strength":"specific strength","tip":"actionable tip"}]}');
 
       final res = await CloudFunctionService.callClaude(
         
           model: 'claude-haiku-4-5-20251001',
-          maxTokens: 600,
+          maxTokens: 700,
           messages: [{'role': 'user', 'content': sb.toString()}],
         );
       
@@ -243,6 +244,97 @@ class _CompletionScreenState extends State<CompletionScreen>
     widget.allResults.fold<double>(0, (v, r) =>
       v + ((r['wordsPerSecond'] as num?)?.toDouble() ?? 0))
     / widget.allResults.length;
+
+  // - Metric: Eye contact -
+  String get _eyeContactLabel {
+    final e = _avgEyeContact;
+    if (e >= 80) return 'STRONG';
+    if (e >= 60) return 'GOOD';
+    if (e >= 40) return 'INCONSISTENT';
+    return 'LOOKING AWAY';
+  }
+
+  Color get _eyeContactColor {
+    final e = _avgEyeContact;
+    if (e >= 80) return AppColors.blue;
+    if (e >= 60) return AppColors.blue;
+    if (e >= 40) return AppColors.amber;
+    return AppColors.red;
+  }
+
+  String get _eyeContactTip {
+    final e = _avgEyeContact;
+    if (e >= 80) return 'Strong eye contact throughout - you looked engaged and confident on camera.';
+    if (e >= 60) return 'Good eye contact overall. Try to hold the camera a little more steadily during longer answers.';
+    if (e >= 40) return 'Your eye contact came and went. Interviewers read looking away as nerves or dishonesty, even when neither is true.';
+    return 'You looked away from the camera a lot. Practice keeping your eyes on the lens, it is the single fastest way to look more confident on video.';
+  }
+
+  double get _avgHesitation {
+    if (widget.allResults.isEmpty) return 0;
+    final vals = widget.allResults.map((r) => (r['hesitationSeconds'] as num?)?.toDouble() ?? 0.0).where((v) => v > 0).toList();
+    if (vals.isEmpty) return 0;
+    return vals.fold<double>(0, (a, b) => a + b) / vals.length;
+  }
+
+  String get _hesitationLabel {
+    final h = _avgHesitation;
+    if (h <= 0) return 'NOT MEASURED';
+    if (h <= 2.0) return 'QUICK';
+    if (h <= 4.0) return 'STEADY';
+    if (h <= 6.0) return 'SLOW START';
+    return 'LONG PAUSES';
+  }
+
+  Color get _hesitationColor {
+    final h = _avgHesitation;
+    if (h <= 0) return AppColors.dim;
+    if (h <= 4.0) return AppColors.blue;
+    if (h <= 6.0) return AppColors.amber;
+    return AppColors.red;
+  }
+
+  String get _hesitationTip {
+    final h = _avgHesitation;
+    if (h <= 0) return 'We could not measure your response time this session.';
+    if (h <= 2.0) return 'You started answering quickly and confidently. Just make sure you are not rushing before you have thought it through.';
+    if (h <= 4.0) return 'Healthy pause before answering. A short beat to gather your thoughts reads as composed, not slow.';
+    if (h <= 6.0) return 'You took a while to start on average. A little silence is fine, but long pauses can read as being caught off guard.';
+    return 'Long pauses before answering. Practise a go-to opening line to buy yourself a second while you gather your thoughts.';
+  }
+
+  // - Metric: Answer length -
+  String get _lengthLabel {
+    if (widget.allResults.isEmpty) return '-';
+    final avgWords = _totalWords / widget.allResults.length;
+    if (avgWords < 15) return 'TOO SHORT';
+    if (avgWords < 25) return 'A BIT SHORT';
+    if (avgWords <= 55) return 'JUST RIGHT';
+    return 'A BIT LONG';
+  }
+
+  Color get _lengthColor {
+    final l = _lengthLabel;
+    if (l == 'JUST RIGHT') return AppColors.blue;
+    if (l == 'A BIT SHORT' || l == 'A BIT LONG') return AppColors.amber;
+    return AppColors.red;
+  }
+
+  String get _lengthTip {
+    final l = _lengthLabel;
+    if (l == 'JUST RIGHT') return 'Your answers were a good length - enough to make a point without rambling.';
+    if (l == 'TOO SHORT') return 'Your answers were very short. Employers want at least one full example. Aim to back up every answer with a specific detail.';
+    if (l == 'A BIT SHORT') return 'A little short. Add one concrete example or number to each answer to make it land harder.';
+    return 'Your answers ran a bit long. Get to the point faster - lead with your main answer, then one supporting detail.';
+  }
+
+  // - Metric: STAR structure -
+  String? get _starTip {
+    if (_aiFeedback == null) return null;
+    final star = _aiFeedback!['starUsage'];
+    if (star == null) return null;
+    return star.toString();
+  }
 
   // - Metric 2: Filler word breakdown -
   Map<String, int> get _fillerBreakdown {
@@ -596,6 +688,23 @@ class _CompletionScreenState extends State<CompletionScreen>
                         badgeColor: _paceColor,
                         body: _paceTip,
                       ),
+                      const SizedBox(height: 10),
+                      _metricCard(
+                        icon: Icons.remove_red_eye_rounded,
+                        title: 'EYE CONTACT',
+                        value: '${_avgEyeContact.round()}% on camera',
+                        badge: _eyeContactLabel,
+                        badgeColor: _eyeContactColor,
+                        body: _eyeContactTip,
+                      ),
+                      const SizedBox(height: 10),
+                      _metricCard(icon: Icons.timer_outlined, title: 'RESPONSE TIME', value: _avgHesitation <= 0 ? 'Not measured' : '${_avgHesitation.toStringAsFixed(1)}s before answering', badge: _hesitationLabel, badgeColor: _hesitationColor, body: _hesitationTip),
+                      const SizedBox(height: 10),
+                      _metricCard(icon: Icons.notes_rounded, title: 'ANSWER LENGTH', value: '${widget.allResults.isEmpty ? 0 : (_totalWords / widget.allResults.length).round()} words per answer', badge: _lengthLabel, badgeColor: _lengthColor, body: _lengthTip),
+                      if (_starTip != null) ...[
+                        const SizedBox(height: 10),
+                        _metricCard(icon: Icons.auto_stories_rounded, title: 'STAR STRUCTURE', value: 'Story structure', badge: 'STAR', badgeColor: AppColors.blue, body: _starTip!),
+                      ],
                       const SizedBox(height: 10),
                       _fillerBreakdownCard(),
                       const SizedBox(height: 10),

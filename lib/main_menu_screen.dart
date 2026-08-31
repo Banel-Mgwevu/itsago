@@ -9,10 +9,12 @@ import 'main.dart';
 import 'progress_screen.dart';
 import 'cv_library_screen.dart';
 import 'setup_screen.dart';
+import 'interview_mode_screen.dart';
 import 'ai_coach_screen.dart';
 import 'about_screen.dart';
 import 'privacy_rights_screen.dart';
 import 'ats_cv_builder_screen.dart';
+import 'purchase_service.dart';
 
 const Color _ink   = Color(0xFF1A1C2A);
 const Color _red   = Color(0xFFCC3B30);
@@ -50,6 +52,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
       _showWelcomeIfFirst();
       _checkMaintenance();
       _checkAnnouncement();
+      _checkPremiumWelcome();
     });
   }
 
@@ -78,7 +81,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
               color: AppColors.ink,
               padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
               child: Row(children: [
-                const Text('🇿🇦', style: TextStyle(fontSize: 28)),
+                Text('ZA', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
                 const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('SANIBONANI, $name!',
@@ -91,7 +94,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
             Padding(padding: const EdgeInsets.all(18),
               child: Column(children: [
                 Text(
-                  'Lekker to have you here, mfowethu! 💪\nPractice your interviews, fix your CV and walk into your next opportunity sharp sharp.',
+                  'Lekker to have you here, mfowethu!\nPractice your interviews, fix your CV and walk into your next opportunity sharp sharp.',
                   style: AppText.body.copyWith(height: 1.5),
                   textAlign: TextAlign.center),
                 const SizedBox(height: 16),
@@ -103,12 +106,69 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                       color: AppColors.ink,
                       border: AppBorders.ink2,
                       boxShadow: [AppShadows.hard3]),
-                    child: Center(child: Text('ASIYE — LET\'S GO! 🚀',
+                    child: Center(child: Text('ASIYE, LET\'S GO!',
                       style: AppText.button.copyWith(letterSpacing: 1.5))))),
               ])),
           ]))));
   }
 
+  Future<void> _checkPremiumWelcome() async {
+    final isPremium = PurchaseService().isPremium;
+    if (!isPremium) return;
+    final prefs = await SharedPreferences.getInstance();
+    final shownCount = prefs.getInt('premium_welcome_shown_count') ?? 0;
+    if (shownCount >= 2) return;
+    await prefs.setInt('premium_welcome_shown_count', shownCount + 1);
+    if (!mounted) return;
+    final name = FirebaseAuth.instance.currentUser?.displayName?.split(' ').first ?? 'Champ';
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: AppColors.inkAt(0.6),
+      builder: (dlg) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.white,
+            border: AppBorders.ink3,
+            boxShadow: [AppShadows.hard5]),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: double.infinity,
+              color: const Color(0xFF1C1C3A),
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
+              child: Row(children: [
+                const Icon(Icons.celebration_rounded, color: Color(0xFFFFD700), size: 28),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('CONGRATS, $name!',
+                    style: AppText.title.copyWith(color: Colors.white, letterSpacing: 1.5)),
+                  const SizedBox(height: 2),
+                  Text('You are now ITSAGO Premium',
+                    style: AppText.caption.copyWith(color: const Color(0xFFFFD700))),
+                ])),
+              ])),
+            Padding(padding: const EdgeInsets.all(18),
+              child: Column(children: [
+                Text(
+                  'Your Grid, Ubuntu and Vivid CV designs are unlocked for good. Go build the CV that gets you hired. Wishing you all the best out there!',
+                  style: AppText.body.copyWith(height: 1.5),
+                  textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () => Navigator.pop(dlg),
+                  child: Container(
+                    width: double.infinity, height: 46,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1C1C3A),
+                      border: AppBorders.ink2,
+                      boxShadow: [AppShadows.hard3]),
+                    child: Center(child: Text('THANK YOU',
+                      style: AppText.button.copyWith(letterSpacing: 1.5))))),
+              ])),
+          ]))));
+  }
   Future<void> _checkMaintenance() async {
     if (!RemoteConfigService.maintenanceMode) return;
     if (!mounted) return;
@@ -215,7 +275,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                     sub: 'Practice video interview', accent: _red, badge: '',
                     icon: Icons.video_camera_front_rounded,
                     onTap: () async {
-                      if (mounted) _push(SetupScreen(cameras: widget.cameras));
+                      if (mounted) _push(InterviewModeScreen(cameras: widget.cameras));
                     })),
                 const SizedBox(height: 12),
                 FadeTransition(opacity: _fade(0.2, 0.6),
@@ -245,13 +305,13 @@ class _MainMenuScreenState extends State<MainMenuScreen>
               ])))])))));
   }
 
-  // ── POSTER ─────────────────────────────────────────────
+  // ---- POSTER ------------------------------
   Widget _poster() {
     return Container(
       width: double.infinity, height: 230,
       color: _ink,
       child: Stack(children: [
-        // Large amber circle — upper right bleed
+  // ---- SECTION ------------------------------
         Positioned(top: -45, right: -35,
           child: Container(width: 150, height: 150,
             decoration: BoxDecoration(shape: BoxShape.circle,
@@ -329,7 +389,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
     );
   }
 
-  // ── EYEBROW ────────────────────────────────────────────
+  // ---- EYEBROW ------------------------------
   Widget _eyebrow() {
     return Row(children: [
       Container(width: 50, height: 50,
@@ -352,7 +412,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
     ]);
   }
 
-  // ── MENU CARD ──────────────────────────────────────────
+  // ---- MENU CARD ------------------------------
   Widget _card({
     required String title,
     required String sub,
@@ -416,16 +476,14 @@ class _MainMenuScreenState extends State<MainMenuScreen>
             child: Column(children: [
               Container(height: 5, color: accent),
               Expanded(child: Center(
-                child: Text('→', style: const TextStyle(
-                  fontSize: 20, color: Colors.white,
-                  fontWeight: FontWeight.w900)))),
+                child: Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 22))),
             ])),
         ]),
       ),
     );
   }
 
-  // ── STAT GRID ──────────────────────────────────────────
+  // ---- STAT GRID ------------------------------
   Widget _grid() {
     final items = [
       {'label': 'AI\nPOWERED',    'icon': Icons.psychology_rounded,   'accent': _blue},
@@ -473,8 +531,8 @@ class _MainMenuScreenState extends State<MainMenuScreen>
     ]);
   }
 
-  // ── DRAWER ─────────────────────────────────────────────
-  // ── DRAWER ─────────────────────────────────────────────
+  // ---- DRAWER ------------------------------
+  // ---- DRAWER ------------------------------
   Widget _drawer() => Drawer(
     backgroundColor: Colors.white,
     child: Column(children: [
@@ -485,7 +543,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
           sub: 'Practice video interview', accent: _red,
           onTap: () async {
             Navigator.pop(context);
-            if (mounted) _push(SetupScreen(cameras: widget.cameras));
+            if (mounted) _push(InterviewModeScreen(cameras: widget.cameras));
           }),
         const SizedBox(height: 10),
         _dItem(icon: Icons.auto_fix_high_rounded, title: 'ATS CV BUILDER',
@@ -539,7 +597,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
           const Text('ITSAGO AI', style: TextStyle(
             fontSize: 22, fontWeight: FontWeight.w900,
             color: Colors.white, letterSpacing: 1)),
-          Text('INTERVIEW PREP  •  ZA', style: TextStyle(
+          Text('INTERVIEW PREP - ZA', style: TextStyle(
             fontSize: 9, fontWeight: FontWeight.w700,
             color: _amber, letterSpacing: 1)),
         ])),
@@ -587,9 +645,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                   color: _dim, fontWeight: FontWeight.w600)),
               ]))),
             Container(width: 24, height: 58, color: _ink,
-              child: Center(child: Text('→', style: TextStyle(
-                color: Colors.white, fontSize: 14,
-                fontWeight: FontWeight.w900)))),
+              child: Center(child: Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16))),
           ]))));
   }
 
@@ -604,7 +660,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
         const SizedBox(width: 3),
         Container(width: 11, height: 11, color: _amber),
       ]),
-      Text('v1.0.1  •  ITSAGO AI  •  ZA', style: TextStyle(
+      Text('v1.0.1 - ITSAGO AI - ZA', style: TextStyle(
         fontSize: 8.5, fontWeight: FontWeight.w700,
         color: _dim, letterSpacing: 1)),
     ]));
@@ -657,7 +713,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                   fontSize: 10, fontWeight: FontWeight.w900,
                   color: _dim, letterSpacing: 2)),
                 const SizedBox(height: 8),
-                Text('Practise with Lizzy, your AI interviewer. She asks you real questions out loud while the app tracks your confidence and body language — so you are ready when it counts.',
+                Text('Practise with Lizzy, your AI interviewer. She asks you real questions out loud while the app tracks your confidence and body language, so you are ready when it counts.',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
                     color: _ink, height: 1.5)),
 
@@ -671,9 +727,9 @@ class _MainMenuScreenState extends State<MainMenuScreen>
 
                 _step('1', 'TELL US WHERE YOU ARE APPLYING', 'Enter the company name and paste the job description for questions tailored just for you.', _blue),
                 const SizedBox(height: 8),
-                _step('2', 'LIZZY INTERVIEWS YOU', '5 questions, one at a time. Lizzy speaks each one aloud — answer naturally, just like the real thing.', _amber),
+                _step('2', 'LIZZY INTERVIEWS YOU', '5 questions, one at a time. Lizzy speaks each one aloud, answer naturally, just like the real thing.', _amber),
                 const SizedBox(height: 8),
-                _step('3', 'ANSWER WITH CONFIDENCE', '20 seconds per answer. Speak naturally — we analyse your words, tone and body language in real time.', _red),
+                _step('3', 'ANSWER WITH CONFIDENCE', '20 seconds per answer. Speak naturally, we analyse your words, tone and body language in real time.', _red),
                 const SizedBox(height: 8),
                 _step('4', 'SEE HOW YOU DID', 'Get your confidence score, personalised tips, and see exactly how to improve before the real interview.', _ink),
 
@@ -714,7 +770,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                 Expanded(flex: 2, child: GestureDetector(
                   onTap: () {
                     Navigator.pop(dlg);
-                    _push(SetupScreen(cameras: widget.cameras));
+                    _push(InterviewModeScreen(cameras: widget.cameras));
                   },
                   child: Container(
                     height: 48,
@@ -876,19 +932,3 @@ class _MainMenuScreenState extends State<MainMenuScreen>
           ]))));
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

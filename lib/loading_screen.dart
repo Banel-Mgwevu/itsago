@@ -60,7 +60,7 @@ class _LoadingScreenState extends State<LoadingScreen>
 
     try {
       final questions = isGeneric
-        ? _fallback(widget.company)
+        ? await _generateGeneric(widget.company, widget.questionCategories)
         : await _generate(widget.jobDescription, widget.company, widget.apiKey);
 
       await _set('QUESTIONS READY - STARTING...', 2, 800);
@@ -74,20 +74,98 @@ class _LoadingScreenState extends State<LoadingScreen>
     }
   }
 
+  /// General interview questions - AI-generated so they sound like a real
+  /// interviewer, not a fixed rotation of the same 5 questions every time.
+  /// Falls back to the curated static question bank (QuestionService) if
+  /// the AI call fails, which is why that import stays even on failure -
+  /// both paths correctly respect the categories the person selected on
+  /// the setup screen.
+  Future<List<String>> _generateGeneric(
+      String company, List<String> categories) async {
+    try {
+      final catLabel = categories.isEmpty
+          ? 'general workplace behavioural questions'
+          : categories.map(_categoryLabel).join(', ');
+      final res = await CloudFunctionService.callClaude(
+          model: 'claude-haiku-4-5-20251001',
+          maxTokens: 300,
+          messages: [{'role': 'user', 'content':
+            'You are a warm, experienced interviewer at $company running a '
+            'friendly practice interview. Write exactly 5 interview '
+            'questions covering these question types: $catLabel.\n\n'
+            'Sound like a real person talking in a real conversation, not '
+            'a form or a survey. Rules:\n'
+            '- Plain, natural spoken English - contractions are fine '
+            '("what\'s", "you\'ve", "isn\'t")\n'
+            '- One simple sentence per question, max 14 words\n'
+            '- No two questions may start with the same opening words\n'
+            '- Use a templated opener like "Tell me about a time..." or '
+            '"Describe a situation where..." AT MOST once across all 5 '
+            'questions - vary the phrasing the rest of the time\n'
+            '- Build up naturally like a real interview: Q1 is a warm, '
+            'easy opener about the candidate; Q2-3 explore the selected '
+            'question types; Q4 goes one level deeper; Q5 is a warm '
+            'closing question\n'
+            '- Mention $company naturally in at least one question\n\n'
+            'Return ONLY a valid JSON array of 5 strings. No markdown, no numbering.',
+          }],
+        );
+
+        final raw   = CloudFunctionService.extractText(res);
+        final clean = raw.replaceAll(RegExp(r'```[a-z]*'), '').replaceAll('```', '').trim();
+        final list  = jsonDecode(clean) as List;
+        if (list.length >= 3) {
+          return list.take(5).map((q) => q.toString()).toList();
+        }
+    } catch (e) {
+      if (kDebugMode) print('General question generation failed: $e');
+    }
+    return QuestionService.generate(
+        company: company, jobTitle: '', jobDescription: '',
+        categories: categories);
+  }
+
+  String _categoryLabel(String c) => switch (c) {
+    'behavioural' => 'behavioural (past experiences)',
+    'situational' => 'situational (hypothetical scenarios)',
+    'values'      => 'company values and culture fit',
+    'strength'    => 'strengths and self-assessment',
+    'technical'   => 'technical or role-specific skills',
+    'leadership'  => 'leadership and teamwork',
+    'salary'      => 'salary and compensation expectations',
+    _             => c,
+  };
+
   Future<List<String>> _generate(
       String jobDesc, String company, String apiKey) async {
     try {
       final res = await CloudFunctionService.callClaude(
           model: 'claude-haiku-4-5-20251001',
-          maxTokens: 250,
+          maxTokens: 300,
           messages: [{'role': 'user', 'content':
-            'Create exactly 5 short interview questions for a candidate applying to $company.\n'
-            'Job description: ${jobDesc.length > 500 ? jobDesc.substring(0, 500) : jobDesc}\n\n'
-            'Rules:\n'
-            '- Each question is ONE simple sentence, max 12 words\n'
-            '- No compound questions (no and/or)\n'
-            '- Gradual: Q1 easy opener, Q2-3 specific, Q4-5 behavioural\n'
-            '- Think friendly HR screen, not executive panel\n\n'
+            'You are a warm, experienced interviewer at $company '
+            'interviewing a candidate for this role:\n'
+            '${jobDesc.length > 500 ? jobDesc.substring(0, 500) : jobDesc}\n\n'
+            'Write exactly 5 interview questions for a friendly practice '
+            'session. Sound like a real person having a conversation, not '
+            'a form or a template. Rules:\n'
+            '- Plain, natural spoken English - contractions are fine '
+            '("what\'s", "you\'ve", "isn\'t")\n'
+            '- One simple sentence per question, max 14 words\n'
+            '- No compound questions (no "and"/"or" joining two questions)\n'
+            '- No two questions may start with the same opening words\n'
+            '- Use a templated opener like "Tell me about a time..." or '
+            '"Describe a situation where..." AT MOST once across all 5 '
+            'questions - vary the phrasing the rest of the time, the way '
+            'a real interviewer naturally would\n'
+            '- Build up like a real interview conversation: Q1 is a warm, '
+            'easy opener about the candidate; Q2 explores their interest '
+            'in this specific role; Q3 probes a skill or experience '
+            'directly relevant to the job description; Q4 goes one level '
+            'deeper with a real workplace scenario tied to this role; Q5 '
+            'is a warm closing question\n'
+            '- Reference specific skills or responsibilities from the job '
+            'description where natural, not just generic phrasing\n\n'
             'Return ONLY a valid JSON array of 5 strings. No markdown, no numbering.',
           }],
         );

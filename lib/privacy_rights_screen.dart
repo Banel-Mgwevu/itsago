@@ -1,8 +1,11 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:interviewai/splash_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'purchase_service.dart';
 import 'app_theme.dart';
 import 'cv_storage_service.dart';
 
@@ -40,23 +43,35 @@ class _PrivacyRightsScreenState extends State<PrivacyRightsScreen> {
   Future<void> _deleteAccount() async {
     final confirm = await _dialog(
       title: 'DELETE MY ACCOUNT', color: AppColors.red,
-      message: 'Permanently deletes:\n\n• All your CVs and files\n• Your interview sessions\n• Your progress data\n• Your account\n\nThis is irreversible.',
+      message: 'Permanently deletes:\n\n- All your CVs and files\n- Your interview sessions\n- Your progress data\n- Your account\n\nThis is irreversible.',
       action: 'DELETE EVERYTHING');
     if (confirm != true) return;
     setState(() => _loading = true);
     try {
-      // Re-auth check — Firebase requires recent login for delete
+      // Re-auth check - Firebase requires recent login for delete
       final authUser = FirebaseAuth.instance.currentUser;
       if (authUser == null) { setState(() => _loading = false); _toast('Not signed in.'); return; }
       final uid = authUser.uid;
-      try { await authUser.delete(); } catch (e) {
+      try {
+        final googleSignIn = GoogleSignIn();
+        final googleUser = await googleSignIn.signIn();
+        if (googleUser == null) {
+          setState(() => _loading = false);
+          _toast('Re-authentication required to delete your account.');
+          return;
+        }
+        final googleAuth = await googleUser.authentication;
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+        await authUser.reauthenticateWithCredential(credential);
+      } catch (e) {
         setState(() => _loading = false);
-        await FirebaseAuth.instance.signOut();
-        if (mounted) Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const SplashScreen()),
-          (r) => false);
+        _toast('Please sign out and sign back in, then try deleting again.');
         return;
       }
+      await authUser.delete();
       await CVStorageService.deleteAllCVs();
       final db = FirebaseFirestore.instance;
       final userDoc = db.collection('users').doc(uid);
@@ -67,16 +82,15 @@ class _PrivacyRightsScreenState extends State<PrivacyRightsScreen> {
       await userDoc.delete();
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      if (mounted) {
-        Navigator.of(context).popUntil((r) => r.isFirst);
-        _toast('Account and all data permanently deleted.');
-      }
+      await FirebaseAuth.instance.signOut();
+      if (mounted) Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const SplashScreen()),
+        (r) => false);
     } catch (e) {
       setState(() => _loading = false);
       _toast('Please sign out and sign back in, then try deleting again. Firebase requires recent login.');
     }
   }
-
   Future<void> _revokeConsent() async {
     final confirm = await _dialog(
       title: 'REVOKE CV CONSENT', color: AppColors.amber,
@@ -109,7 +123,7 @@ class _PrivacyRightsScreenState extends State<PrivacyRightsScreen> {
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('MY DATA & PRIVACY', style: AppText.title.copyWith(color: Colors.white, letterSpacing: 1.5)),
-              Text('POPIA rights — South Africa', style: AppText.caption.copyWith(color: AppColors.amber)),
+              Text('POPIA rights - South Africa', style: AppText.caption.copyWith(color: AppColors.amber)),
             ])),
             Container(width: 6, height: 38, color: AppColors.amber),
           ])),
@@ -132,7 +146,18 @@ class _PrivacyRightsScreenState extends State<PrivacyRightsScreen> {
             const SizedBox(height: 20),
             _sectionLabel('YOUR DATA'),
             const SizedBox(height: 10),
-            _infoRow(Icons.fingerprint_rounded,  'User ID',        shortUid),
+            GestureDetector(
+              onTap: () => showDialog(context: context, builder: (_) => AlertDialog(
+                title: const Text('Your User ID', style: TextStyle(fontWeight: FontWeight.w900)),
+                content: SelectableText(uid, style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('CLOSE'))])),
+              onLongPress: () {
+                Clipboard.setData(ClipboardData(text: uid));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('User ID copied to clipboard'),
+                  duration: Duration(seconds: 2)));
+              },
+              child: _infoRow(Icons.fingerprint_rounded, 'User ID', shortUid + '  (tap to view, hold to copy)')),
             _infoRow(Icons.description_rounded,  'Saved CVs',      "$_cvCount CV${_cvCount == 1 ? '' : 's'} on our servers"),
             _infoRow(Icons.timer_rounded,         'Retention',      'Auto-deleted after 30 days'),
             _infoRow(Icons.storage_rounded,       'Data stored',    'Firebase (ZA region)'),

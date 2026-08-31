@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'cv_storage_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -30,6 +31,24 @@ void main() async {
     // Enforce POPIA 30-day retention on startup
   CVStorageService.purgeExpired().catchError((_) {});
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+    // App Check is DISABLED for now. Its debug provider needs the printed
+    // debug token registered in Firebase Console > App Check > Apps >
+    // (this app) > Manage debug tokens before it will validate - without
+    // that step it fails with "Too many attempts" on every call and
+    // appears to be interfering with Cloud Function requests (including
+    // transcription). Re-enable only after registering the token and
+    // confirming Cloud Function calls still succeed with it active.
+    //
+    // try {
+    //   await FirebaseAppCheck.instance.activate(
+    //     androidProvider: kDebugMode
+    //         ? AndroidProvider.debug
+    //         : AndroidProvider.playIntegrity,
+    //   );
+    // } catch (e) {
+    //   print('App Check activation failed (non-fatal): $e');
+    // }
 
     tz.initializeTimeZones();
     try { await RemoteConfigService.init(); } catch (_) {}

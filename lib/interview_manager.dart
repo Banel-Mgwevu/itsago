@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +8,7 @@ import 'audio_speech_manager.dart';
 import 'camera_face_manager.dart';
 import 'app_config.dart';
 import 'cloud_function_service.dart';
+import 'answer_recorder.dart';
 
 class InterviewManager {
 
@@ -23,6 +24,7 @@ class InterviewManager {
   bool _disposed = false;
   late final AudioSpeechManager _audio;
   late final CameraFaceManager  _camera;
+  final AnswerRecorder _answerRec = AnswerRecorder();
 
   // Core state
   int    _qIdx          = 0;
@@ -57,6 +59,8 @@ class InterviewManager {
   String _sentimentText = 'Neutral';
   double _cardOpacity   = 0.1;
   bool   _isSpeaking    = false;
+  int    _qStartMs      = 0;
+  int    _firstSpeechMs = 0;
   String _lastSnapshot  = '';
 
   // Feature 2 - mid-answer coaching
@@ -73,6 +77,11 @@ class InterviewManager {
   Map<String, dynamic> _reviewData = {};
 
   final List<Map<String, dynamic>> _results = [];
+  // Tracks in-flight _runBackgroundReview() calls. Individual questions
+  // never wait on these - only the exit and natural-completion paths do,
+  // briefly and with a timeout, so the completion screen never shows a
+  // "Processing..." placeholder for the last answered question.
+  final List<Future<void>> _pendingReviews = [];
 
   static const _coachingTips = [
     'Sit up straight and face the camera directly',
@@ -115,6 +124,10 @@ class InterviewManager {
       onCameraInitialized:   () => _push({'cameraInitialized': true}),
       onFaceDetectionChange: (f) => _push({'faceDetected': f}),
       onFaceWarning:         (w) => _push({'showingFaceWarning': w}),
+      onCameraError:         (msg) {
+        print('Interview: camera unavailable ($msg) - continuing audio-only');
+        _push({'cameraInitialized': false, 'cameraUnavailable': true});
+      },
     );
   }
 
@@ -157,7 +170,34 @@ class InterviewManager {
     _doStopRecording();
   }
 
-  void fillRemainingWithZero() {
+  Future<void> fillRemainingWithZero() async {
+    // If the person exits while actively mid-answer, capture and score
+    // whatever they've said so far instead of throwing it away - stops
+    // the recording and reserves/kicks off its review exactly like a
+    // normal answer, just without advancing to a next question (there
+    // isn't one to go to on exit).
+    if (_isRecording) {
+      _stopAndReserveResult();
+      _push({
+        'isRecording':          false,
+        'speechStatus':         'notListening',
+        'showingFaceWarning':   false,
+        'showingFinalCountdown':false,
+      });
+    }
+
+    // The most recently answered question's background review
+    // (transcription + scoring) may still be running - wait briefly for
+    // it so the completion screen shows its real transcript/score
+    // instead of the "Processing..." placeholder. Bounded so a slow
+    // network call can never hang the exit.
+    if (_pendingReviews.isNotEmpty) {
+      try {
+        await Future.wait(_pendingReviews)
+            .timeout(const Duration(seconds: 6), onTimeout: () => []);
+      } catch (_) {}
+    }
+
     // Fill all unanswered questions with zero scores
     for (int i = _results.length; i < questions.length; i++) {
       _results.add({
@@ -179,6 +219,7 @@ class InterviewManager {
         'totalDetectionFrames':  0,
       });
     }
+    _answerRec.cancel();
     _audio.stopAll();
     _camera.stopAll();
     _cancelAll();
@@ -186,6 +227,7 @@ class InterviewManager {
   }
 
   void skipQuestion() {
+    _answerRec.cancel();
     _transcript = '[SKIPPED - NO RESPONSE]';
     _confidence = 3.0; // Hard cap skip at 3%
     _saveResult();
@@ -194,6 +236,7 @@ class InterviewManager {
   void pauseInterviewTimer(bool pause) => _timerPaused = pause;
 
   void forceExitInterview() {
+    _answerRec.cancel();
     _isRecording = false;
     _cancelAll();
     _audio.stopAll();
@@ -213,6 +256,8 @@ class InterviewManager {
   void dispose() {
     _disposed = true;
     _cancelAll();
+    _answerRec.cancel();
+    _answerRec.dispose();
     _audio.dispose();
     _camera.dispose();
   }
@@ -274,11 +319,10 @@ class InterviewManager {
 
   void _onTTSComplete() {
     if (_camera.faceWarningTtsPlaying) return;
-    // If recording is active, restart mic immediately after TTS
-    if (_isRecording) {
-      _audio.startListening();
-      return;
-    }
+    // If recording is active, do nothing: the WAV recorder keeps
+    // running through the TTS, and we must not start the on-device
+    // recognizer - it would steal the mic from the WAV recorder.
+    if (_isRecording) return;
     _push({'ttsCompleted': true, 'recordingCanStart': true});
     _startPreCountdown();
   }
@@ -313,10 +357,13 @@ class InterviewManager {
   // - Recording -
 
   void _startRecording() {
+    print('ðŸŽ¤ _startRecording - recording begins, starting mic now');
     _recDuration     = 0;
     _silenceSeconds  = 0;
     _lastSnapshot    = '';
     _isSpeaking      = false;
+    _qStartMs        = DateTime.now().millisecondsSinceEpoch;
+    _firstSpeechMs   = 0;
     _showSpeakPrompt = true;
     _midCoachingMsg  = '';
     _lowConfStreak   = 0;
@@ -335,7 +382,27 @@ class InterviewManager {
       'coachingTip':               '',
       'midCoachingMsg':            '',
     });
-    _audio.startListening();
+    // NOTE: we deliberately do NOT start the on-device recognizer here.
+    // Two simultaneous mic clients on Android means one of them receives
+    // silence - and on this device the privileged Google recognizer
+    // grabs the mic (then returns nothing), leaving the WAV recorder
+    // with silent audio. The WAV recorder must own the microphone.
+    // Cloud transcription path: record the answer as WAV and
+    // transcribe it server-side. On devices whose built-in recognizer
+    // returns nothing (e.g. this Huawei's doneNoResult), this is the
+    // ONLY source of the transcript. Amplitude drives the live
+    // "speaking" visuals so the UI still reacts to the user's voice.
+    _answerRec.start(onAmplitude: (db) {
+      if (!_isRecording || _timerPaused) return;
+      if (db > -35.0) {
+        _isSpeaking     = true;
+        _silenceSeconds = 0;
+        if (_firstSpeechMs == 0) {
+          _firstSpeechMs = DateTime.now().millisecondsSinceEpoch;
+        }
+        _push({'isSpeaking': true, 'analysisCardsOpacity': 0.05});
+      }
+    });
     _startAnalysisLoop();
 
     _masterTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -397,7 +464,7 @@ class InterviewManager {
       }
 
       // Final countdown
-      if (_recDuration == 17 && !_showFinalCountdown) {
+      if (_recDuration == 27 && !_showFinalCountdown) {
         _showFinalCountdown = true;
         _finalCountdown     = 3;
         _push({'showingFinalCountdown': true, 'finalCountdown': 3,
@@ -409,28 +476,23 @@ class InterviewManager {
         _finalCountdown--;
         _push({'finalCountdown': _finalCountdown});
       }
-      if (_recDuration >= 20) {
+      if (_recDuration >= 30) {
         t.cancel();
         _push({'showingFinalCountdown': false});
         // Direct call - bypasses guard so timer always moves to next question
         if (_isRecording) {
           _doStopRecording();
-        } else {
-          // Recording already stopped by user tap - ensure flow continues
-          if (_transcript.isEmpty) _transcript = '[NO RESPONSE - SILENT]';
-          _checkFollowUp();
         }
+        // else: recording was already stopped by a user tap, and
+        // _doStopRecording() already reserved the result and advanced -
+        // nothing left to do here.
       }
     });
   }
 
   void _doStopRecording() {
-    if (!_isRecording) return;
-    _isRecording = false;
-    _audio.stopAll(); // stop mic + TTS immediately
-    _masterTimer?.cancel();
-    _analysisTimer?.cancel();
-    _camera.stopFaceDetection();
+    if (!_stopAndReserveResult()) return;
+
     _push({
       'isRecording':          false,
       'isAnalyzing':          false,
@@ -442,18 +504,210 @@ class InterviewManager {
       'showingFinalCountdown':false,
       'midCoachingMsg':       '',
     });
-    if (_transcript.isEmpty) {
-      _transcript = '[NO RESPONSE - SILENT]';
-      _push({'currentTranscript': _transcript});
-    }
-    _checkFollowUp();
+
+    // Move on the instant recording ends. Transcription, content
+    // scoring, Lizzy's reaction, and question adaptation all now run
+    // fully in the background and never hold up the interview.
+    _nextQuestion();
   }
 
-  // - Follow-up -
+  /// Stops the current recording (if any), captures everything its
+  /// review will need, reserves its slot in _results immediately, and
+  /// kicks off the background review. Does NOT advance to the next
+  /// question or touch any UI state - callers decide what happens next.
+  /// Used both by the normal end-of-answer flow (_doStopRecording, which
+  /// advances afterward) and by exiting mid-answer (fillRemainingWithZero,
+  /// which does not - there's no next question to go to). Returns false
+  /// if nothing was recording, so callers can skip their own follow-up.
+  bool _stopAndReserveResult() {
+    if (!_isRecording) return false;
+    _isRecording = false;
+    _audio.stopAll(); // stop mic + TTS immediately
+    _masterTimer?.cancel();
+    _analysisTimer?.cancel();
+    _camera.stopFaceDetection();
 
-  Future<void> _checkFollowUp() async {
-    // One question per slot - no follow-ups
-    await _afterAnswer();
+    // Capture everything this answer's review will need BEFORE anything
+    // else resets it (advancing to the next question resets _qIdx, the
+    // camera's per-question counters, _confidence, etc. immediately -
+    // anything read after that point would silently describe the wrong
+    // question).
+    final snapQIdx         = _qIdx;
+    final snapQuestion     = questions[_qIdx];
+    final snapRecDuration  = _recDuration;
+    final snapFaceWarnings = _camera.noFaceWarningCount;
+    final snapEyeScore     = _camera.eyeContactScore;
+    final snapEyeFrames    = _camera.eyeContactFrames;
+    final snapTotalFrames  = _camera.totalDetectionFrames;
+    final snapFaceDetected = _camera.faceDetected;
+    final snapHesitation   = (_firstSpeechMs > 0 && _qStartMs > 0)
+        ? ((_firstSpeechMs - _qStartMs) / 1000.0).clamp(0.0, 60.0) : 0.0;
+    // The live estimate tracked continuously during recording - used as
+    // an immediate placeholder so the reserved slot is never blank while
+    // the real transcript and content score are still being fetched.
+    final liveConfidence   = _confidence;
+    final liveEmotion      = _emotion;
+
+    // Reserve this question's slot in _results right now, synchronously.
+    // This is what makes exiting mid-review safe: _results.length must
+    // reflect "answered" the instant recording stops, not once the
+    // background review finishes - otherwise fillRemainingWithZero()
+    // could mistake an in-progress answer for an unanswered one and
+    // overwrite it with a zero score.
+    final resultIndex = _results.length;
+    _results.add({
+      'questionNumber':    snapQIdx + 1,
+      'question':          snapQuestion,
+      'transcript':        'Processing...',
+      'emotion':           liveEmotion,
+      'confidence':        liveConfidence,
+      'fillerWords':       <String>[],
+      'sentimentScore':    0.0,
+      'sentiment':         'Neutral',
+      'recordingDuration': snapRecDuration,
+      'wordCount':         0,
+      'wordsPerSecond':    0.0,
+      'fillerRatio':       0.0,
+      'faceDetectionWarnings': snapFaceWarnings,
+      'eyeContactScore':       snapEyeScore,
+      'eyeContactFrames':      snapEyeFrames,
+      'totalDetectionFrames':  snapTotalFrames,
+      'hesitationSeconds':     snapHesitation,
+    });
+
+    final reviewFuture = _runBackgroundReview(
+      resultIndex:    resultIndex,
+      qIdx:           snapQIdx,
+      question:       snapQuestion,
+      recDuration:    snapRecDuration,
+      faceWarnings:   snapFaceWarnings,
+      faceDetected:   snapFaceDetected,
+      eyeScore:       snapEyeScore,
+    );
+    _pendingReviews.add(reviewFuture);
+    return true;
+  }
+
+  /// The entire post-answer pipeline for one question: cloud
+  /// transcription, filler/sentiment detection, content scoring,
+  /// delivery scoring, saving the finished result, Lizzy's reaction, and
+  /// next-question adaptation. Runs fully detached from the interview
+  /// flow (kicked off from _doStopRecording right after _nextQuestion()
+  /// already advanced), so none of it can ever block or delay moving on.
+  Future<void> _runBackgroundReview({
+    required int    resultIndex,
+    required int    qIdx,
+    required String question,
+    required int    recDuration,
+    required int    faceWarnings,
+    required bool   faceDetected,
+    required double eyeScore,
+  }) async {
+    final tag = 'Review Q${qIdx + 1}';
+    print('$tag: started');
+    try {
+      String transcript = '';
+      try {
+        transcript = await _answerRec.stopAndTranscribe()
+            .timeout(const Duration(seconds: 25), onTimeout: () {
+          print('$tag: transcription timed out after 25s');
+          return '';
+        });
+      } catch (e) {
+        print('$tag: transcription threw: $e');
+      }
+      if (transcript.trim().isEmpty) transcript = '[NO RESPONSE - SILENT]';
+      print('$tag: transcript ready (${transcript.length} chars)');
+      if (_disposed) {
+        print('$tag: aborted - manager disposed before scoring');
+        return;
+      }
+
+      final fillers        = _computeFillers(transcript);
+      final sentimentData  = _computeSentiment(transcript);
+      final sentimentScore = sentimentData['sentimentScore'] as double;
+
+      double contentScore = 60.0;
+      try {
+        contentScore = await _scoreContentFor(
+            question: question, transcript: transcript)
+            .timeout(const Duration(seconds: 15), onTimeout: () {
+          print('$tag: content scoring timed out after 15s');
+          return 60.0;
+        });
+      } catch (e) {
+        print('$tag: content scoring threw: $e');
+      }
+      print('$tag: content score = $contentScore');
+      if (_disposed) {
+        print('$tag: aborted - manager disposed after scoring');
+        return;
+      }
+
+      final words = transcript.split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty).length;
+      final voiceScore   = _scoreVoiceFor(
+          words: words, fillers: fillers.length, recDuration: recDuration);
+      final postureScore = _scorePostureFor(
+          faceDetected: faceDetected, faceWarnings: faceWarnings);
+      final toneScore    = _scoreToneFor(sentimentScore: sentimentScore);
+
+      final isNoResponse = transcript.startsWith('[') ||
+          transcript.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length < 3;
+      final blended = ((contentScore * 0.45) +
+                       (voiceScore   * 0.15) +
+                       (postureScore * 0.15) +
+                       (eyeScore     * 0.15) +
+                       (toneScore    * 0.10)).clamp(0.0, 100.0);
+      final confidence = isNoResponse
+          ? blended.clamp(2.0, 8.0)
+          : contentScore < 15
+          ? blended.clamp(3.0, 15.0)
+          : contentScore < 30
+          ? blended.clamp(10.0, 32.0)
+          : blended.clamp(20.0, 96.0);
+      final emotion = confidence >= 83 ? 'Very Confident'
+                    : confidence >= 73 ? 'Confident'
+                    : confidence >= 63 ? 'Composed'
+                    : confidence >= 50 ? 'Neutral'
+                    : confidence >= 38 ? 'Nervous'
+                    : 'Very Nervous';
+
+      if (resultIndex < _results.length) {
+        _results[resultIndex] = {
+          ..._results[resultIndex],
+          'transcript':     transcript,
+          'confidence':     confidence,
+          'emotion':        emotion,
+          'fillerWords':    fillers,
+          'sentimentScore': sentimentScore,
+          'sentiment':      sentimentData['sentiment'],
+          'wordCount':      words,
+          'wordsPerSecond': recDuration > 0 ? words / recDuration : 0.0,
+          'fillerRatio':    words > 0 ? fillers.length / words : 0.0,
+        };
+        print('$tag: done - confidence=$confidence');
+      } else {
+        print('$tag: FAILED TO SAVE - resultIndex $resultIndex out of range '
+            '(results has ${_results.length} entries)');
+      }
+
+      // Cosmetic only - never affects saved results, safe to finish last.
+      unawaited(_lizzysReaction(transcript, confidence));
+      unawaited(_adaptNextQuestion(qIdx + 1, confidence));
+    } catch (e, st) {
+      // This review must never get permanently stuck on "Processing..."
+      // - if anything above threw unexpectedly, write a clear failure
+      // marker now instead of leaving the placeholder forever.
+      print('$tag: CRASHED: $e\n$st');
+      if (resultIndex < _results.length &&
+          _results[resultIndex]['transcript'] == 'Processing...') {
+        _results[resultIndex] = {
+          ..._results[resultIndex],
+          'transcript': '[REVIEW FAILED - $e]',
+        };
+      }
+    }
   }
 
 
@@ -461,11 +715,14 @@ class InterviewManager {
 
   // - NEW: Content-first scoring -
 
-  Future<double> _scoreContent() async {
-    final isReal = !_transcript.startsWith('[');
+  Future<double> _scoreContentFor({
+    required String question,
+    required String transcript,
+  }) async {
+    final isReal = !transcript.startsWith('[');
     if (!isReal) return 5.0;
 
-    final words = _transcript
+    final words = transcript
         .split(RegExp(r'\s+'))
         .where((w) => w.isNotEmpty)
         .length;
@@ -477,9 +734,9 @@ class InterviewManager {
           model: 'claude-haiku-4-5-20251001',
           maxTokens: 80,
           messages: [{'role': 'user', 'content':
-            'You are scoring a 20-second interview answer. '
-            'Question: "${questions[_qIdx]}"\n'
-            'Answer: "$_transcript"\n\n'
+            'You are scoring a 30-second interview answer. '
+            'Question: "$question"\n'
+            'Answer: "$transcript"\n\n'
             'Score 0-100 on CONTENT ONLY.\n'
             'SCORING GUIDE:\n'
             '90-100: Clear specific answer, directly addresses question\n'
@@ -502,71 +759,87 @@ class InterviewManager {
     return 60.0;
   }
 
-  double _scoreDelivery(int words, int fillers) {
-    // Word count - calibrated for 20 seconds
-    final double wordScore = words < 10  ? 20.0
-                           : words < 20  ? 55.0
-                           : words <= 55 ? 100.0
+  /// VOICE: how the answer sounds - amount said for the time available,
+  /// speaking pace, and filler usage. Calibrated for 30-second answers
+  /// (a comfortable pace of ~2-2.5 words/sec gives 60-75 words in 30s).
+  double _scoreVoiceFor({
+    required int words,
+    required int fillers,
+    required int recDuration,
+  }) {
+    final double wordScore = words < 12  ? 20.0
+                           : words < 30  ? 55.0
+                           : words <= 85 ? 100.0
                            : 80.0; // slightly penalise rushing
 
-    // Filler ratio
+    double paceScore = 65.0;
+    if (recDuration > 0 && words > 0) {
+      final wps = words / recDuration;
+      if      (wps >= 1.5 && wps <= 3.0) paceScore = 95.0;
+      else if (wps >= 1.0 && wps <= 3.8) paceScore = 78.0;
+      else if (wps  < 0.5 || wps  > 4.5) paceScore = 40.0;
+    }
+
     final ratio = words > 0 ? fillers / words : 0.0;
     final double fillerScore = ratio <= 0.03 ? 100.0
                              : ratio <= 0.08 ? 75.0
                              : ratio <= 0.15 ? 45.0
                              : 20.0;
 
-    // Face detection bonus
-    final double faceBonus = _camera.faceDetected ? 100.0 : 40.0;
+    return (wordScore * 0.40) + (paceScore * 0.30) + (fillerScore * 0.30);
+  }
 
-    // Delivery = word count 50% + fillers 35% + face 15%
-    return (wordScore * 0.50) + (fillerScore * 0.35) + (faceBonus * 0.15);
+  /// POSTURE / PRESENCE: staying framed and facing the camera throughout
+  /// the answer. Uses face presence and how often the "face lost" warning
+  /// fired. (True body-posture and hand-gesture tracking needs pose
+  /// detection - see note in chat - so camera framing is the proxy here.)
+  double _scorePostureFor({
+    required bool faceDetected,
+    required int  faceWarnings,
+  }) {
+    double score = faceDetected ? 88.0 : 35.0;
+    score -= faceWarnings * 10.0;
+    return score.clamp(0.0, 100.0);
+  }
+
+  /// TONE: positivity of the language used in the answer.
+  /// sentimentScore runs -1..1 -> map to 30-95 so neutral answers sit at
+  /// a reasonable baseline instead of being punished.
+  double _scoreToneFor({required double sentimentScore}) {
+    return (62.0 + sentimentScore * 55.0).clamp(30.0, 95.0);
+  }
+
+  /// Pure, side-effect-free filler detection for the background review
+  /// pipeline - unlike _detectFillers(), this never pushes UI state, so
+  /// it's safe to call after the interview has already moved on to a
+  /// later question without corrupting that question's live display.
+  List<String> _computeFillers(String text) {
+    final words = text.toLowerCase().split(RegExp(r'\s+'));
+    return words
+        .map((w) => w.replaceAll(RegExp(r'[^\w]'), ''))
+        .where(_fillerList.contains)
+        .toList();
+  }
+
+  /// Pure, side-effect-free sentiment detection - see _computeFillers.
+  Map<String, dynamic> _computeSentiment(String text) {
+    const pos = ['good','great','excellent','amazing','love','excited','passionate'];
+    const neg = ['bad','terrible','hate','difficult','problem','issue','struggle'];
+    final ws = text.toLowerCase().split(' ');
+    final p  = ws.where((w) => pos.any(w.contains)).length;
+    final n  = ws.where((w) => neg.any(w.contains)).length;
+    return {
+      'sentiment':      p > n ? 'Positive' : n > p ? 'Negative' : 'Neutral',
+      'sentimentScore': p > n ? 0.3 + (p - n) * 0.1
+                      : n > p ? -(0.3 + (n - p) * 0.1) : 0.0,
+    };
   }
   // - Answer flow -
 
-  Future<void> _afterAnswer() async {
-    // 1. Score content via Claude (60% weight)
-    final contentScore  = await _scoreContent();
-    if (_disposed) return;
-
-    // 2. Score delivery locally (40% weight)
-    final words = _transcript.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-    final deliveryScore = _scoreDelivery(words, _fillers.length);
-
-    // 3. Blend - content is primary
-    // Eye contact bonus/penalty - up to 10 points
-    final eyeScore     = _camera.eyeContactScore;
-    final eyeBonus     = eyeScore >= 80 ? 8.0
-                       : eyeScore >= 60 ? 4.0
-                       : eyeScore >= 40 ? 0.0
-                       : -6.0;
-
-    // No response = hard cap at 8 regardless of delivery/face/confidence
-    final isNoResponse = _transcript.startsWith('[') ||
-        _transcript.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length < 3;
-    final blended = ((contentScore * 0.60) + (deliveryScore * 0.40) + eyeBonus).clamp(0.0, 100.0);
-    _confidence = isNoResponse
-        ? blended.clamp(2.0, 8.0)
-        : contentScore < 15
-        ? blended.clamp(3.0, 15.0)
-        : contentScore < 30
-        ? blended.clamp(10.0, 32.0)
-        : blended.clamp(20.0, 96.0);
-    _push({'confidenceScore': _confidence});
-
-    _saveResult();
-    if (_disposed) return;
-    await _lizzysReaction();
-    if (_disposed) return;
-    await _adaptNextQuestion();
-    if (_disposed) return;
-    _nextQuestion();
-  }
-
-  Future<void> _lizzysReaction() async {
-    final isReal = !_transcript.startsWith('[');
+  Future<void> _lizzysReaction(String transcript, double confidence) async {
+    final isReal = !transcript.startsWith('[');
     if (!isReal) return;
-    final words = _transcript.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    final words = transcript.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
     if (words < 5) return; // Too short to react to
 
     final stylePrompt = interviewStyle == 'pressure'
@@ -585,11 +858,12 @@ class InterviewManager {
           maxTokens: 50,
           messages: [{'role': 'user', 'content':
             '$stylePrompt\n\n'
-            'The candidate just answered: "${_transcript.length > 200 ? _transcript.substring(0, 200) : _transcript}"\n'
-            'Their confidence score was ${_confidence.round()}%.\n'
+            'The candidate just answered: "${transcript.length > 200 ? transcript.substring(0, 200) : transcript}"\n'
+            'Their confidence score was ${confidence.round()}%.\n'
             'Return only the reaction sentence, nothing else.'}],
         );
 
+        if (_disposed) return; // interview may have ended while this was in flight
         final reaction = (CloudFunctionService.extractText(res)).trim();
         if (reaction.isNotEmpty) _push({'lizzysReaction': reaction});
     } catch (e) {
@@ -599,7 +873,7 @@ class InterviewManager {
 
 
   String _buildCoachingTip(int words, int fillers, double confidence) {
-    if (words < 10) return 'Too brief - even in 20 seconds, give at least one clear sentence that directly answers the question.';
+    if (words < 10) return 'Too brief - even in 30 seconds, give at least one clear sentence that directly answers the question.';
     if (words < 20) return 'Add one specific example or detail to your next answer. A concrete point makes a short answer much stronger.';
     if (fillers > 5) return 'You used many filler words. Pause silently instead of saying um or like - a pause sounds more confident.';
     if (confidence < 45) return 'Focus on answering the question directly first, then add a supporting detail. Lead with your main point.';
@@ -626,13 +900,12 @@ class InterviewManager {
     _push({'showQuestionReview': false});
   }
 
-  Future<void> _adaptNextQuestion() async {
-    final nextIdx = _qIdx + 1;
+  Future<void> _adaptNextQuestion(int nextIdx, double confidence) async {
     if (nextIdx >= questions.length) return;
     if (interviewStyle == 'neutral') return; // no adaptation in neutral
 
     // Only adapt if candidate is struggling - never make questions harder
-    if (_confidence < 45 && interviewStyle == 'friendly') {
+    if (confidence < 45 && interviewStyle == 'friendly') {
       // Struggling - make next question more supportive
       try {
       final res = await CloudFunctionService.callClaude(
@@ -644,6 +917,7 @@ class InterviewManager {
               'Return only the new question. Keep it one sentence.'}],
           );
 
+          if (_disposed) return; // interview may have ended while this was in flight
           _adaptedQuestions[nextIdx] =
             (CloudFunctionService.extractText(res)).trim();
       } catch (_) {}
@@ -709,6 +983,7 @@ class InterviewManager {
     if (transcript != _lastSnapshot && transcript.isNotEmpty) {
       _isSpeaking     = true;
       _silenceSeconds = 0;
+      if (_firstSpeechMs == 0) { _firstSpeechMs = DateTime.now().millisecondsSinceEpoch; }
       _push({'isSpeaking': true, 'analysisCardsOpacity': 0.05});
     }
     _transcript   = transcript;
@@ -771,10 +1046,11 @@ class InterviewManager {
       'eyeContactScore':       _camera.eyeContactScore,
       'eyeContactFrames':      _camera.eyeContactFrames,
       'totalDetectionFrames':  _camera.totalDetectionFrames,
+      'hesitationSeconds':     (_firstSpeechMs > 0 && _qStartMs > 0) ? ((_firstSpeechMs - _qStartMs) / 1000.0).clamp(0.0, 60.0) : 0.0,
     });
   }
 
-  void _nextQuestion() {
+  Future<void> _nextQuestion() async {
     if (_qIdx < questions.length - 1) {
       _qIdx++;
       _resetForQuestion();
@@ -784,7 +1060,18 @@ class InterviewManager {
       _audio.stopAll();
       _camera.stopAll();
       _cancelAll();
-      Timer(const Duration(seconds: 1), () => onNavigateToCompletion(_results));
+      await Future.delayed(const Duration(seconds: 1));
+      // The very last question's background review (transcription +
+      // scoring) may still be running at this point - wait briefly for
+      // it so the completion screen never shows a "Processing..."
+      // placeholder. Bounded so a slow network call can't hang the exit.
+      if (_pendingReviews.isNotEmpty) {
+        try {
+          await Future.wait(_pendingReviews)
+              .timeout(const Duration(seconds: 6), onTimeout: () => []);
+        } catch (_) {}
+      }
+      onNavigateToCompletion(_results);
     }
   }
 

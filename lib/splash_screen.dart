@@ -231,6 +231,20 @@ class _SplashScreenState extends State<SplashScreen>
                     style: AppText.label.copyWith(color: AppColors.dim)),
                 ])),
             ])),
+
+          // - Bottom tagline -
+          Positioned(left: 0, right: 0, bottom: 48,
+            child: Opacity(opacity: _textOpacity.value,
+              child: Transform.translate(
+                offset: Offset(0, _textSlide.value),
+                child: Center(child: Text(
+                  'Get the job. Change your story.',
+                  textAlign: TextAlign.center,
+                  style: AppText.body.copyWith(
+                    color: AppColors.dim,
+                    fontWeight: FontWeight.w700,
+                    fontStyle: FontStyle.italic,
+                    letterSpacing: 0.2)))))),
         ]),
       ),
     );

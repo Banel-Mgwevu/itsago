@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null 
+        && request.auth.uid == userId;
+      match /subscriptions/{subscriptionId} {
+        allow read, write: if request.auth != null 
+          && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.userId == userId
+          && request.resource.data.keys().hasAll([
+               'userId', 'isPremium', 'platform'])
+          && request.resource.data.isPremium is bool;
+        allow update: if request.auth != null
+          && request.auth.uid == userId
+          && resource.data.userId == userId
+          && request.resource.data.userId == userId;
+      }
+      match /purchase_history/{purchaseId} {
+        allow read: if request.auth != null 
+          && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.userId == userId;
+        allow update, delete: if false;
+      }
+      match /sessions/{sessionId} {
+        allow read, write, delete: if request.auth != null
+          && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasAny([
+               'timestamp', 'company', 'overallConfidence']);
+      }
+      match /cvs/{cvId} {
+        allow read, write, delete: if request.auth != null
+          && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.dataSubjectUid == userId
+          && request.resource.data.keys().hasAll([
+               'company', 'jobTitle', 'timestamp',
+               'processingPurpose', 'dataMinimised'])
+          && request.resource.data.processingPurpose 
+               == 'ats_optimisation'
+          && request.resource.data.dataMinimised == true;
+        allow read: if request.auth != null
+          && request.auth.uid == userId
+          && (resource.data.retentionExpiry == null
+            || resource.data.retentionExpiry > request.time);
+      }
+    }
+    match /admin/{document=**} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email in [
+          'your-admin-email@example.com'
+        ];
+    }
+    match /analytics/subscription_metrics {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    // -- Revoked devices (premium lost on account delete) --
+    match /revoked_devices/{deviceId} {
+      allow create, update: if request.auth != null
+        && request.resource.data.keys().hasAll(['deviceId', 'revoked']);
+      allow read: if true;
+      allow delete: if false;
+    }
+
+    match /purchase_log/{purchaseToken} {
+      allow create: if request.resource.data.keys().hasAll([
+        'purchaseToken', 'productId', 'platform', 'timestamp'])
+        && request.resource.data.purchaseToken == purchaseToken;
+      allow update: if request.auth != null
+        && resource.data.keys().hasAll(['purchaseToken'])
+        && request.resource.data.purchaseToken == purchaseToken
+        && (request.resource.data.userId == null
+            || request.resource.data.userId == request.auth.uid);
+      allow read: if request.auth != null;
+      allow delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

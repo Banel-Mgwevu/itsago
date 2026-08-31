@@ -3,6 +3,12 @@
 class CloudFunctionService {
   static final _functions = FirebaseFunctions.instance;
 
+  // AI text generation - now routed to Google Gemini. The method keeps
+  // its original name and signature so the 12 existing call sites across
+  // the app don't need to change: the Cloud Function accepts this exact
+  // payload shape and returns Claude-shaped responses ({content:[{text}]}),
+  // and any Claude model name in `model` is mapped server-side to
+  // gemini-2.5-flash.
   static Future<Map<String, dynamic>> callClaude({
     required String model,
     required int maxTokens,
@@ -17,7 +23,7 @@ class CloudFunctionService {
     };
 
     final result = await _functions
-        .httpsCallable('callClaude')
+        .httpsCallable('callGemini')
         .call({'payload': payload});
 
     return Map<String, dynamic>.from(result.data);
@@ -26,5 +32,29 @@ class CloudFunctionService {
   static String extractText(Map<String, dynamic> response) {
     final content = response['content'] as List<dynamic>;
     return content[0]['text'] as String;
+  }
+
+  // Send a base64-encoded audio recording to the transcribeAudio Cloud
+  // Function and return the recognized transcript. Returns empty string
+  // on any failure so callers can fall back to on-device recognition.
+  static Future<String> transcribeAudio({
+    required String audioBase64,
+    int sampleRate = 16000,
+    String encoding = 'LINEAR16',
+  }) async {
+    try {
+      final result = await _functions
+          .httpsCallable('transcribeAudio')
+          .call({
+        'audioBase64': audioBase64,
+        'sampleRate': sampleRate,
+        'encoding': encoding,
+      });
+      final data = Map<String, dynamic>.from(result.data);
+      return (data['transcript'] as String?)?.trim() ?? '';
+    } catch (e) {
+      // Network error, timeout, etc. Caller falls back to on-device words.
+      return '';
+    }
   }
 }

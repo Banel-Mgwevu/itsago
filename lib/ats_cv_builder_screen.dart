@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -78,7 +78,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   String _processingMsg = 'Reading your CV...';
   double _genProgress   = 0.0;
   static const _designNames = ['EXECUTIVE', 'SPECTRUM', 'MINIMAL', 'GRID', 'UBUNTU', 'VIVID'];
-  static const _premiumDesigns = {3, 4, 5};
+  static const _premiumDesigns = {1, 2, 3, 4, 5};
   String? _docErrorType;
   int _savedCount = 0;
   bool _isPremium = false;
@@ -474,19 +474,35 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
                     decoration: InputDecoration(hintText: 'Type your answer here...', hintStyle: TextStyle(color: AppColors.dim),
                       border: InputBorder.none, contentPadding: const EdgeInsets.all(14), filled: true, fillColor: AppColors.white))),
               ])),
-            Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
               child: Row(children: [
                 if (!q.required) ...[
-                  Expanded(child: GestureDetector(onTap: _skipGap,
-                    child: Container(height: 46,
-                      decoration: BoxDecoration(color: AppColors.cream, border: Border.all(color: AppColors.dim, width: 2)),
-                      child: Center(child: Text('SKIP', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.dim, letterSpacing: 1)))))),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: _skipGap,
+                      child: Container(
+                        height: 46,
+                        decoration: BoxDecoration(color: AppColors.cream, border: Border.all(color: AppColors.dim, width: 2)),
+                        child: Center(child: Text('SKIP', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.dim, letterSpacing: 1))),
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 12),
                 ],
-                Expanded(flex: 2, child: GestureDetector(onTap: _submitAnswer,
-                  child: Container(height: 46, color: q.required ? AppColors.red : AppColors.blue,
-                    child: Center(child: Text('NEXT', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1)))))),
-          ])),
+                Expanded(
+                  flex: 2,
+                  child: GestureDetector(
+                    onTap: _submitAnswer,
+                    child: Container(
+                      height: 46,
+                      color: q.required ? AppColors.red : AppColors.blue,
+                      child: Center(child: Text('NEXT', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1))),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
           ])),
         const SizedBox(height: 20),
         Container(width: double.infinity, padding: const EdgeInsets.all(14),
@@ -596,24 +612,29 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
                     const Spacer(),
                     GestureDetector(
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _ATSPreviewPage(
-                        data: _optimized, designIndex: i, onSelect: () { Navigator.pop(context); setState(() => _state = _S.download); }))),
+                        data: _optimized, designIndex: i, onSelect: () { Navigator.pop(context); setState(() { _selectedDesign = i; _state = _S.download; }); }))),
                       child: Icon(isSelected ? Icons.fullscreen : Icons.remove_red_eye, color: isSelected ? AppColors.blue : AppColors.dim, size: 16)),
-                  ])),
-              ])));
-        })),
+                  ])),  // Row closes + bottom Container closes
+              ]),  // Column children closes
+            ),  // outer Container closes
+          );  // GestureDetector closes
+        },  // itemBuilder closes
+      )),  // ListView.builder + Expanded closes
       Container(width: double.infinity, padding: const EdgeInsets.all(16), color: Colors.white,
         child: GestureDetector(
-          onTap: () => setState(() => _state = _S.download),
+          onTap: () {
+            setState(() => _state = _S.download);
+            ReviewService.onCVGenerated();
+          },
           child: Container(width: double.infinity, height: 52,
             decoration: BoxDecoration(color: AppColors.blue, border: Border.all(color: AppColors.ink, width: 2), boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
               const SizedBox(width: 8),
               Text('USE ${_designNames[_selectedDesign]} DESIGN', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)),
-            ])))),
-    ]);
+            ])))),  // Row + Container + GestureDetector + Container closes
+    ]);  // Column closes
   }
-
   Widget _cvCardPreview(int i) {
     switch (i) {
       case 0: return _execCardPreview();
@@ -625,7 +646,6 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
       default: return _execCardPreview();
     }
   }
-
   Widget _ubuntuCardPreview() {
     const green = Color(0xFF2D6A4F);
     const lightGreen = Color(0xFF52B788);
@@ -635,7 +655,6 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(_s('name').toUpperCase(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 2)),
           const SizedBox(height: 3),
-          if (_s('headline').isNotEmpty) Text(_s('headline'), style: TextStyle(fontSize: 11, color: green, fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           Text([_s('email'), _s('phone')].where((v) => v.isNotEmpty).join('  .  '), style: TextStyle(fontSize: 9, color: Colors.grey[600])),
         ])),
@@ -858,8 +877,8 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
 
         // - TRANSFORMATION SCORE -
         Builder(builder: (ctx) {
-          final before = (_extracted['currentATSScore'] as num?)?.toInt() ?? 45;
-          final after  = (atsScore as num?)?.toInt()  ?? 80;
+          final before = int.tryParse(_extracted['currentATSScore']?.toString() ?? '45') ?? 45;
+          final after  = int.tryParse(atsScore?.toString() ?? '80') ?? 80;
           final gain   = after - before;
           final percentile = after >= 90 ? 5 : after >= 80 ? 12 : after >= 70 ? 25 : after >= 60 ? 40 : 55;
           final gainColor  = gain > 0 ? AppColors.blue : AppColors.red;
@@ -1172,7 +1191,7 @@ Return ONLY valid JSON, no markdown:
   "extractedData": {
     "name":"","email":"","phone":"","location":"","linkedin":"",
     "website":"","headline":"","summary":"",
-    "experience":[{"title":"","company":"","duration":"","description":""}],
+    "experience":[{"title":"","company":"","duration":"","bullets":["",""]}],
     "education":[{"degree":"","institution":"","year":""}],
     "skills":[],"certifications":[],"achievements":[],"awards":[],"languages":[]
   },
@@ -1180,7 +1199,8 @@ Return ONLY valid JSON, no markdown:
   "currentATSScore":45
 }
 IMPORTANT: Always extract certifications and achievements even if buried in the CV.
-GRADUATE RULE: If the person has no formal work experience, look for and extract: academic projects, final year projects, WIL placements, internships, volunteer work, part-time jobs, extracurricular activities, SRC membership, sports teams. Put these in the experience array formatted professionally.
+EXPERIENCE FORMAT: For each role, write 3-4 short bullet points (not one paragraph) covering what the person actually did and achieved there - based only on what's in the document, never invented. If the source CV already has bullet points, split them out as-is. If it's written as a paragraph, break it into 3-4 separate bullet points at natural points (responsibilities, achievements, tools/skills used). If there's genuinely only enough detail for 1-2 bullets, that's fine - never pad with filler.
+GRADUATE RULE: If the person has no formal work experience, look for and extract: academic projects, final year projects, WIL placements, internships, volunteer work, part-time jobs, extracurricular activities, SRC membership, sports teams. Put these in the experience array formatted professionally, as bullets.
 If email or phone is missing add required:true. CRITICAL: Be specific - for education ask qualification+institution+year, for experience ask jobtitle+company+duration, never ask vague questions like what is your background.
 Max 5 gaps. Return ONLY the JSON.''';
 
@@ -1305,11 +1325,10 @@ Max 5 gaps. Return ONLY the JSON.''';
           await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
           print('Design $i failed: $e');
-          throw Exception('Design ${["EXEC","SPEC","MIN","GRID"][i]} failed: $e');
+          throw Exception('Design ${_designNames[i]} failed: $e');
         }
       }
       await _saveToFirebase();
-      await _saveAllLocally();
       setState(() => _state = _S.designPicker);
       _saveSession();
     } catch (e) { _err('Failed to generate CVs: $e'); }
@@ -1322,8 +1341,8 @@ Max 5 gaps. Return ONLY the JSON.''';
       final optimisedDocx = _optimized.isNotEmpty ? _buildDocx() : null;
       final company        = _optimized['name'] as String? ?? 'My CV';
       final jobTitle       = _optimized['headline'] as String? ?? '';
-      final beforeScoreVal = _extracted['currentATSScore'] as int? ?? 45;
-      final afterScoreVal  = _optimized['atsScore'] as int? ?? 80;
+    final beforeScoreVal = int.tryParse(_extracted['currentATSScore']?.toString() ?? '45') ?? 45;
+    final afterScoreVal  = int.tryParse(_optimized['atsScore']?.toString() ?? '80') ?? 80;
       final consent = await CVStorageService.hasConsent();
       if (!consent) await CVStorageService.recordConsent();
       final before = ATSScore(score: beforeScoreVal, grade: beforeScoreVal >= 70 ? 'B' : 'C',
@@ -1348,19 +1367,6 @@ Max 5 gaps. Return ONLY the JSON.''';
     } catch (e) { print('Firebase CV save failed: $e'); }
   }
 
-  Future<void> _saveAllLocally() async {
-    try {
-      final dir  = await _saveDir();
-      final name = _safeName().isEmpty ? 'ITSAGO_CV' : _safeName();
-      final ts   = _ts();
-      for (int i = 0; i < _pdfs.length; i++) {
-        final file = File('${dir.path}/${name}_${_designNames[i]}_$ts.pdf');
-        await file.writeAsBytes(_pdfs[i]);
-      }
-      print('All 4 CVs saved locally to ${(await _saveDir()).path}');
-    } catch (e) { print('Local save failed: $e'); }
-  }
-
   Future<void> _optimizeWithAI() async {
     final answers = _gaps.where((g) => g.answer != null).map((g) => g.field + ': ' + (g.answer ?? '')).join('\n');
     final response = await CloudFunctionService.callClaude(
@@ -1370,10 +1376,11 @@ Max 5 gaps. Return ONLY the JSON.''';
         'Original data: ' + jsonEncode(_extracted) + '\n'
         'Additional answers: ' + answers + '\n'
         'Return ONLY valid JSON with these fields: name, headline, email, phone, location, linkedin, summary, experience, education, skills, certifications, achievements, awards, languages, atsScore.\n'
+        'EXPERIENCE FORMAT: Each experience entry must be {"title":"","company":"","duration":"","bullets":["","",""]} - 3 to 4 short, punchy bullet points per role, NOT a single paragraph. Rewrite existing bullets/description text into this bullet format, strengthening the wording, without inventing achievements that aren\'t supported by the original data or answers.\n'
         'CRITICAL: Preserve ALL certifications achievements and awards.\n'
         'GRADUATE RULE: Use academic projects WIL volunteer for experience if no formal work.\n'
         'SUMMARY RULE: Write compelling 2-3 sentence summary never leave blank.\n'
-        'Use action verbs in all bullets. Return ONLY the JSON.'}]);
+        'Use strong action verbs to start every bullet. Return ONLY the JSON.'}]);
 
 
     if (response['type'] == 'error') throw Exception('Optimization failed');
@@ -1466,14 +1473,14 @@ Max 5 gaps. Return ONLY the JSON.''';
       if (_s('linkedin').isNotEmpty) _spST(_s('linkedin')),
       pw.SizedBox(height: 18),
       if (_list('skills').isNotEmpty) ...[_spSH('SKILLS', teal), pw.SizedBox(height: 8),
-        ..._list('skills').take(9).map((s) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 6), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        ..._list('skills').take(5).map((s) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 4), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
           pw.Text(s, style: pw.TextStyle(fontSize: 8, color: PdfColors.white)), pw.SizedBox(height: 3),
           pw.Container(width: 130, height: 3, color: PdfColor(1,1,1,0.2), child: pw.Align(alignment: pw.Alignment.centerLeft, child: pw.Container(width: 100, height: 3, color: teal))),
         ])))],
       if (_list('certifications').isNotEmpty) ...[pw.SizedBox(height: 18), _spSH('CERTIFICATIONS', teal), pw.SizedBox(height: 6),
-        ..._list('certifications').map((c) => pw.Text('- $c', style: pw.TextStyle(fontSize: 8, color: PdfColors.white)))],
+        ..._list('certifications').take(3).map((c) => pw.Text('- $c', style: pw.TextStyle(fontSize: 8, color: PdfColors.white)))],
       if (_list('languages').isNotEmpty) ...[pw.SizedBox(height: 18), _spSH('LANGUAGES', teal), pw.SizedBox(height: 6),
-        ..._list('languages').map((l) => pw.Text('- $l', style: pw.TextStyle(fontSize: 8, color: PdfColors.white)))],
+        ..._list('languages').take(3).map((l) => pw.Text('- $l', style: pw.TextStyle(fontSize: 8, color: PdfColors.white)))],
     ];
     doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
@@ -1486,17 +1493,17 @@ Max 5 gaps. Return ONLY the JSON.''';
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
               if (_s('summary').isNotEmpty) ...[_spH('ABOUT ME', teal), pw.SizedBox(height: 8), pw.Text(_s('summary'), style: pw.TextStyle(fontSize: 10, color: dark, lineSpacing: 1.9)), pw.SizedBox(height: 18)],
               if (_exp().isNotEmpty) ...[_spH('EXPERIENCE', teal), pw.SizedBox(height: 10),
-                ..._exp().map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 14), child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                  pw.Container(width: 3, height: 52, color: teal, margin: const pw.EdgeInsets.only(right: 10, top: 2)),
+                ..._exp().take(2).map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 14), child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                  pw.Container(width: 3, height: 40, color: teal, margin: const pw.EdgeInsets.only(right: 10, top: 2)),
                   pw.Expanded(child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
                     pw.Text(e['title'].toString(), style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: dark)),
                     pw.Text('${e['company']}  -  ${e['duration']}', style: pw.TextStyle(fontSize: 9, color: teal, fontWeight: pw.FontWeight.bold)),
                     pw.SizedBox(height: 4),
-                    ..._bullets(e).take(3).map((b) => pw.Text('- $b', style: pw.TextStyle(fontSize: 9, color: dark, lineSpacing: 1.5))),
+                    ..._bullets(e).take(2).map((b) => pw.Text('- $b', style: pw.TextStyle(fontSize: 8.5, color: dark, lineSpacing: 1.5))),
                   ])),
                 ])))],
               if (_edu().isNotEmpty) ...[_spH('EDUCATION', teal), pw.SizedBox(height: 8),
-                ..._edu().map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 8), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                ..._edu().map((e) => pw.Container(margin: const pw.EdgeInsets.only(bottom: 6), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
                   pw.Text(e['degree'].toString(), style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: dark)),
                   pw.Text('${e['institution']}  -  ${e['year']}', style: pw.TextStyle(fontSize: 9, color: teal)),
                 ])))],
@@ -1654,8 +1661,8 @@ Max 5 gaps. Return ONLY the JSON.''';
       final tmp  = await getTemporaryDirectory();
       final file = File('${tmp.path}/${_safeName()}_CV.pdf');
       await file.writeAsBytes(_pdfs[_selectedDesign]);
-      final before = (_extracted['currentATSScore'] as num?)?.toInt() ?? 45;
-      final after  = (_optimized['atsScore']  as num?)?.toInt()  ?? 80;
+      final before = int.tryParse(_extracted['currentATSScore']?.toString() ?? '45') ?? 45;
+      final after  = int.tryParse(_optimized['atsScore']?.toString() ?? '80') ?? 80;
       await Share.shareXFiles(
         [XFile(file.path)],
         subject: '${_s('name')} - Job-Ready ATS CV',
@@ -2006,14 +2013,12 @@ Max 5 gaps. Return ONLY the JSON.''';
             child: const Column(children: [
               Icon(Icons.lock_open_rounded, color: Color(0xFFFFD700), size: 32),
               SizedBox(height: 8),
-              Text('PREMIUM TEMPLATES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
+              Text('LOOK SHARP. GET HIRED.', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)),
               SizedBox(height: 4),
-              Text('Unlock Grid, Ubuntu and Vivid', style: TextStyle(fontSize: 11, color: Colors.white70)),
+              Text('This is the CV that gets you in the room', style: TextStyle(fontSize: 11, color: Colors.white70)),
             ])),
           Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-            _premiumFeature(Icons.grid_view_rounded, 'Grid Template', 'Modern tech layout'),
-            _premiumFeature(Icons.eco_rounded, 'Ubuntu Template', 'Clean entry-level design'),
-            _premiumFeature(Icons.palette_rounded, 'Vivid Template', 'Bold creative design'),
+            const Text('Built to pass the bots, and built to make them remember your name once you are in front of them.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Color(0xFF1C1C3A), fontWeight: FontWeight.w600, height: 1.5)),
             const SizedBox(height: 16),
             Container(
               width: double.infinity,
@@ -2027,18 +2032,23 @@ Max 5 gaps. Return ONLY the JSON.''';
               Text('R29', style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Color(0xFF1C1C3A))),
             ]),
             const SizedBox(height: 4),
-            const Text('You save R30 - 50% off', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w700)),
+            const Text('Less than a taxi fare to work', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w700)),
             const SizedBox(height: 16),
             GestureDetector(
               onTap: () async {
-                Navigator.pop(context);
                 final svc = PurchaseService();
-                await svc.buyPremiumTemplates();
+                final started = await svc.buyPremiumTemplates();
+                if (mounted) {
+                  Navigator.pop(context);
+                  if (!started) {
+                    // error already shown via onPurchaseError callback
+                  }
+                }
               },
               child: Container(width: double.infinity, height: 52,
                 decoration: BoxDecoration(color: const Color(0xFF1C1C3A), border: Border.all(color: Colors.black, width: 2),
                   boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
-                child: const Center(child: Text('UNLOCK PREMIUM', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2))))),
+                child: const Center(child: Text('GET JOB READY', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2))))),
             const SizedBox(height: 10),
             GestureDetector(
               onTap: () async {
@@ -2073,8 +2083,8 @@ Max 5 gaps. Return ONLY the JSON.''';
     ]));
 
   Widget _successUI() {
-    final before = (_extracted['currentATSScore'] as num?)?.toInt() ?? 45;
-    final after  = (_optimized['atsScore']  as num?)?.toInt()  ?? 80;
+    final before = int.tryParse(_extracted['currentATSScore']?.toString() ?? '45') ?? 45;
+    final after  = int.tryParse(_optimized['atsScore']?.toString() ?? '80') ?? 80;
     final gain   = after - before;
     final percentile = after >= 90 ? 5 : after >= 80 ? 12 : after >= 70 ? 25 : after >= 60 ? 40 : 55;
     return SingleChildScrollView(
@@ -2232,7 +2242,7 @@ class _ATSPreviewPage extends StatelessWidget {
   String _contact() => [_s('email'),_s('phone'),_s('location')].where((v) => v.isNotEmpty).join('  -  ');
   List<String> _bullets(Map<String,dynamic> e) { final b = e['bullets']; if (b is List && b.isNotEmpty) return b.map((x) => x.toString()).toList(); final d = e['description']; return d != null && d.toString().isNotEmpty ? [d.toString()] : []; }
 
-  static const _names = ['EXECUTIVE','SPECTRUM','MINIMAL','GRID'];
+  static const _names = ['EXECUTIVE','SPECTRUM','MINIMAL','GRID','UBUNTU','VIVID'];
 
   @override
   Widget build(BuildContext context) {
@@ -2258,6 +2268,8 @@ class _ATSPreviewPage extends StatelessWidget {
       case 1: return _specP();
       case 2: return _minP();
       case 3: return _gridP();
+      case 4: return _ubuntuP();
+      case 5: return _vividP();
       default: return _execP();
     }
   }
@@ -2394,18 +2406,94 @@ class _ATSPreviewPage extends StatelessWidget {
     ]);
   }
 
+  Widget _ubuntuP() {
+    const green = Color(0xFF2D6A4F);
+    const lightGreen = Color(0xFF52B788);
+    return Padding(padding: const EdgeInsets.all(24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: double.infinity, padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(border: Border(left: BorderSide(color: green, width: 4))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_s('name').toUpperCase(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 2)),
+          const SizedBox(height: 4),
+          if (_s('headline').isNotEmpty) Text(_s('headline'), style: TextStyle(fontSize: 12, color: green, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Text(_contact(), style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        ])),
+      const SizedBox(height: 16),
+      Container(width: double.infinity, height: 1, color: lightGreen),
+      const SizedBox(height: 16),
+      if (_s('summary').isNotEmpty) ...[
+        Text('PROFILE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: green, letterSpacing: 2)),
+        const SizedBox(height: 6),
+        Text(_s('summary'), style: const TextStyle(fontSize: 12, height: 1.6)),
+        const SizedBox(height: 16),
+      ],
+      if (_exp().isNotEmpty) ...[
+        Text('EXPERIENCE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: green, letterSpacing: 2)),
+        const SizedBox(height: 8),
+        ..._exp().map((e) => Padding(padding: const EdgeInsets.only(bottom: 10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text((e['title']??'').toString(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          Text(e['company'].toString() + '  -  ' + e['duration'].toString(), style: TextStyle(fontSize: 11, color: green, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 3),
+          ..._bullets(e).take(3).map((b) => Text('- ' + b, style: const TextStyle(fontSize: 11, height: 1.4))),
+        ]))),
+        const SizedBox(height: 8),
+      ],
+      if (_list('skills').isNotEmpty) ...[
+        Text('SKILLS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: green, letterSpacing: 2)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 6, children: _list('skills').map((s) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          color: lightGreen.withOpacity(0.15),
+          child: Text(s, style: TextStyle(fontSize: 11, color: green, fontWeight: FontWeight.w600)))).toList()),
+      ],
+    ]));
+  }
+
+  Widget _vividP() {
+    const purple = Color(0xFF6B2D8B);
+    const pink = Color(0xFFE91E8C);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: double.infinity,
+        decoration: BoxDecoration(gradient: LinearGradient(colors: [purple, pink], begin: Alignment.centerLeft, end: Alignment.centerRight)),
+        padding: const EdgeInsets.all(24),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_s('name').toUpperCase(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
+          const SizedBox(height: 4),
+          if (_s('headline').isNotEmpty) Text(_s('headline'), style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.85))),
+          const SizedBox(height: 6),
+          Text(_contact(), style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.7))),
+        ])),
+      Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (_s('summary').isNotEmpty) ...[
+          Row(children: [Container(width: 16, height: 16, color: pink), const SizedBox(width: 8), Text('ABOUT ME', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: purple, letterSpacing: 2))]),
+          const SizedBox(height: 8),
+          Text(_s('summary'), style: const TextStyle(fontSize: 12, height: 1.6)),
+          const SizedBox(height: 16),
+        ],
+        if (_exp().isNotEmpty) ...[
+          Row(children: [Container(width: 16, height: 16, color: purple), const SizedBox(width: 8), Text('EXPERIENCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: purple, letterSpacing: 2))]),
+          const SizedBox(height: 10),
+          ..._exp().map((e) => Padding(padding: const EdgeInsets.only(bottom: 10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text((e['title']??'').toString(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            Text(e['company'].toString() + '  -  ' + e['duration'].toString(), style: TextStyle(fontSize: 11, color: pink, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 3),
+            ..._bullets(e).take(3).map((b) => Text('- ' + b, style: const TextStyle(fontSize: 11, height: 1.4))),
+          ]))),
+        ],
+        if (_list('skills').isNotEmpty) ...[
+          Row(children: [Container(width: 16, height: 16, color: pink), const SizedBox(width: 8), Text('SKILLS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: purple, letterSpacing: 2))]),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 6, children: _list('skills').map((s) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(border: Border.all(color: pink), borderRadius: BorderRadius.circular(12)),
+            child: Text(s, style: TextStyle(fontSize: 11, color: purple)))).toList()),
+        ],
+      ])),
+    ]);
+  }
   Widget _gH2(String t, Color b, Color r) => Row(children: [
     Container(width: 3, height: 13, color: r), const SizedBox(width: 6),
     Text(t, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: b, letterSpacing: 1.5)),
   ]);
 }
-
-
-
-
-
-
-
-
-
-

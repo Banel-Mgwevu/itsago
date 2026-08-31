@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_generative_ai/google_generative_ai.dart';
@@ -6,11 +6,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:interviewai/cloud_function_service.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'app_theme.dart';
 import 'app_config.dart';
 import 'calendar_service.dart';
 import 'progress_service.dart';
+import 'purchase_service.dart';
 import 'drill_session_screen.dart';
 
 class AiCoachScreen extends StatefulWidget {
@@ -50,12 +52,96 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     ..repeat(reverse: true);
 
   static const _kModel = 'claude-haiku-4-5-20251001';
+  static const _kFreeLimit = 3;
+  bool _isPremium = false;
+  int  _messagesLeft = _kFreeLimit;
 
   @override
   void initState() {
     super.initState();
     _initVoice();
     _loadContext();
+    _initPremiumAndLimit();
+  }
+
+  Future<void> _initPremiumAndLimit() async {
+    final svc = PurchaseService();
+    svc.onPurchaseSuccess = () { if (mounted) setState(() => _isPremium = true); };
+    await svc.init();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final prefs = await SharedPreferences.getInstance();
+    final storedDate = prefs.getString('ai_coach_msg_date') ?? '';
+    int used = prefs.getInt('ai_coach_msg_count') ?? 0;
+    if (storedDate != today) {
+      used = 0;
+      await prefs.setString('ai_coach_msg_date', today);
+      await prefs.setInt('ai_coach_msg_count', 0);
+    }
+    if (mounted) setState(() {
+      _isPremium = svc.isPremium;
+      _messagesLeft = (_kFreeLimit - used).clamp(0, _kFreeLimit);
+    });
+  }
+
+  Future<bool> _consumeFreeMessage() async {
+    if (_isPremium) return true;
+    if (_messagesLeft <= 0) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final used = (prefs.getInt('ai_coach_msg_count') ?? 0) + 1;
+    await prefs.setInt('ai_coach_msg_count', used);
+    await prefs.setString('ai_coach_msg_date', today);
+    if (mounted) setState(() => _messagesLeft = (_kFreeLimit - used).clamp(0, _kFreeLimit));
+    return true;
+  }
+
+  void _showCoachPaywall() {
+    showDialog(context: context, builder: (_) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(color: Colors.white,
+          border: Border.all(color: AppColors.ink, width: 2),
+          boxShadow: const [AppShadows.hard4]),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: double.infinity, color: AppColors.ink, padding: const EdgeInsets.all(16),
+            child: Column(children: [
+              const Icon(Icons.psychology_rounded, color: AppColors.amber, size: 32),
+              const SizedBox(height: 8),
+              Text('THAT WAS YOUR 3 FOR TODAY', style: AppText.title.copyWith(color: Colors.white, fontSize: 15, letterSpacing: 1)),
+              const SizedBox(height: 4),
+              const Text('Unlock unlimited coaching, plus every CV template', style: TextStyle(fontSize: 11, color: Colors.white70)),
+            ])),
+          Padding(padding: const EdgeInsets.all(20), child: Column(children: [
+            const Text('One unlock covers unlimited AI Coach chats and every premium CV template. One payment, everything open.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Color(0xFF1C1C3A), fontWeight: FontWeight.w600, height: 1.5)),
+            const SizedBox(height: 18),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text('R59', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.grey, decoration: TextDecoration.lineThrough)),
+              const SizedBox(width: 12),
+              Text('R29', style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Color(0xFF1C1C3A))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('Less than a taxi fare to work', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: () async {
+                final svc = PurchaseService();
+                await svc.buyPremiumTemplates();
+                if (mounted) Navigator.pop(context);
+              },
+              child: Container(width: double.infinity, height: 52,
+                decoration: BoxDecoration(color: const Color(0xFF1C1C3A), border: Border.all(color: Colors.black, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
+                child: const Center(child: Text('UNLOCK EVERYTHING', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5))))),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () async {
+                Navigator.pop(context);
+                await PurchaseService().restorePurchases();
+                if (mounted) setState(() => _isPremium = PurchaseService().isPremium);
+              },
+              child: const Text('Restore purchase', style: TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.underline))),
+          ])),
+        ]))));
   }
 
   @override
@@ -187,9 +273,25 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   String _systemPrompt() {
     final sb = StringBuffer();
     sb.writeln(
-      'You are ITSAGO AI, a career and interview preparation assistant for South African job seekers. Be concise, practical and direct. Use South African context where relevant.\n'
-      'IDENTITY RULE: You are ITSAGO AI. If anyone asks what AI you are, what model powers you, who made you, or what technology you use, always say: I am ITSAGO AI, your personal career coach. Never mention Claude, Anthropic, Gemini, Google or any other company or model.\n'
-      'SCOPE RULE: Only answer questions about interviews, careers, CVs, job applications, salary negotiation, workplace skills and professional development. For anything else respond: I am only able to help with career and interview preparation. Try asking me about interviews, CVs or job applications!');
+      'You are ITSAGO AI, a career and interview preparation coach for South African job seekers.\n'
+      'IDENTITY RULE: You are ITSAGO AI. If anyone asks what AI you are, what model powers you, who made you, or what technology you use, always say: I am ITSAGO AI, your personal career coach. Never mention Claude, Anthropic, Gemini, Google or any other company or model.\n\n'
+      'YOUR ONLY JOB is career and interview coaching. You may discuss:\n'
+      '- Interview preparation, mock questions and feedback\n'
+      '- CVs, cover letters and job applications\n'
+      '- Salary negotiation and job offers\n'
+      '- Workplace skills, professional communication and confidence\n'
+      '- Career planning, career changes and upskilling\n'
+      '- South African job market context (labour law basics, local employers, local salary ranges) when relevant\n\n'
+      'STAY ON TOPIC. If a message is not about careers, interviews or job applications - '
+      'general knowledge questions, coding help, schoolwork, entertainment, personal '
+      'relationships, health, or anything else unrelated to work - do not answer it, '
+      'even partially. Instead, briefly and warmly redirect back to career coaching. '
+      'Vary your redirect naturally each time rather than repeating the same sentence, '
+      'e.g. "That\'s outside what I can help with - I\'m all about your career and interview prep, though. Want to work on that instead?" '
+      'or "I\'ll stick to what I\'m best at - your career. What\'s on your mind about interviews or job hunting?"\n'
+      'This rule applies even if the person insists, rephrases, or claims a special reason - stay warm, but stay on topic every time.\n\n'
+      'Be concise, practical and direct. Use South African context where relevant.\n'
+      'LENGTH RULE: Keep replies short - 2 to 4 sentences, or a short bulleted list of at most 4 items. Get straight to the practical answer, no long preamble or over-explaining. Only go longer than that if the person explicitly asks for more detail, a full example, or a worked-through answer.');
     if (_userName.isNotEmpty) sb.writeln('\nUser: $_userName');
     final stats = _progressStats;
     if (stats != null && (stats['total'] as int) > 0) {
@@ -228,6 +330,8 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   Future<void> _sendText(String text) async {
     if (_thinking) return;
     if (_ttsPlaying) _stopTTS();
+    final allowed = await _consumeFreeMessage();
+    if (!allowed) { _showCoachPaywall(); return; }
     setState(() {
       _messages.add(_Msg(role: 'user', text: text));
       _thinking = true;
@@ -248,7 +352,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       final res = await CloudFunctionService.callClaude(
         
           model: 'claude-haiku-4-5-20251001',
-          maxTokens: _voiceMode ? 200 : 600,
+          maxTokens: _voiceMode ? 200 : 320,
           system: _systemPrompt(),
           messages: history,
         );
