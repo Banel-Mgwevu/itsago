@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'firebase_options.dart';
 import 'remote_config_service.dart';
+import 'subscription_service.dart';
 import 'app_theme.dart';
 import 'splash_screen.dart';
 import 'main_menu_screen.dart';
@@ -31,6 +32,16 @@ void main() async {
     // Enforce POPIA 30-day retention on startup
   CVStorageService.purgeExpired().catchError((_) {});
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+    // Initialize in-app purchase / subscription handling. Wrapped so a
+    // store-connection issue (e.g. no network, store unavailable) never
+    // blocks the app from starting - PremiumStatus.isPremium() already
+    // falls back to Firestore/local cache if this hasn't finished yet.
+    try {
+      await SubscriptionService().initialize();
+    } catch (e) {
+      if (kDebugMode) print('SubscriptionService init failed (non-fatal): $e');
+    }
 
     // App Check is DISABLED for now. Its debug provider needs the printed
     // debug token registered in Firebase Console > App Check > Apps >

@@ -45,5 +45,30 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+	<!-- Required - app crashes on first permission request without these -->
+	<key>NSCameraUsageDescription</key>
+	<string>ITSAGO uses your camera during practice interviews to check your framing and give you eye contact feedback.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ITSAGO uses your microphone to record your interview answers so they can be transcribed and scored.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>ITSAGO may use on-device speech recognition to help transcribe your practice answers.</string>
+
+	<!-- REQUIRED BEFORE SUBMISSION: Google Sign-In needs its reversed
+	     client ID registered as a URL scheme. Get this value from
+	     GoogleService-Info.plist (the REVERSED_CLIENT_ID field) once
+	     you've registered an iOS app in Firebase Console - it does not
+	     exist yet, so this is a placeholder. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>REPLACE_WITH_REVERSED_CLIENT_ID_FROM_GOOGLESERVICE_INFO_PLIST</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

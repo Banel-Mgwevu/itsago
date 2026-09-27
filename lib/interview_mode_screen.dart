@@ -4,6 +4,7 @@ import 'app_theme.dart';
 import 'setup_screen.dart';
 import 'job_specific_setup_screen.dart';
 import 'purchase_service.dart';
+import 'access_service.dart';
 
 class InterviewModeScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -27,12 +28,22 @@ class _InterviewModeScreenState extends State<InterviewModeScreen>
               curve: Interval(a, b, curve: Curves.easeOut)));
 
   bool _jobSpecificUnlocked = false;
+  bool _hasAccess = false;
 
   @override
   void initState() {
     super.initState();
     _initPurchase();
+    AccessService.canStartInterview().then((v) {
+      if (mounted) setState(() => _hasAccess = v);
+    });
   }
+
+  Widget _accessRibbon(String unlockedLabel) => _hasAccess
+      ? _priceRibbon(label: unlockedLabel, bg: AppColors.ink, fg: Colors.white,
+          icon: Icons.check_rounded)
+      : _priceRibbon(label: 'PREMIUM  R80 / MONTH', bg: AppColors.amber, fg: AppColors.ink,
+          icon: Icons.lock_rounded);
 
   Future<void> _initPurchase() async {
     final svc = PurchaseService();
@@ -276,7 +287,7 @@ class _InterviewModeScreenState extends State<InterviewModeScreen>
               icon: Icons.chat_bubble_rounded,
               title: 'NORMAL INTERVIEW',
               subtitle: 'General practice, ready in seconds',
-              ribbon: _priceRibbon(label: 'FREE, NO LIMIT', bg: AppColors.ink, fg: Colors.white),
+              ribbon: _accessRibbon('UNLOCKED, NO LIMIT'),
               description: 'Give us a company name and start straight away with a broad '
                 'mix of real interview questions.',
               bullets: const [
@@ -292,7 +303,7 @@ class _InterviewModeScreenState extends State<InterviewModeScreen>
               icon: Icons.psychology_alt_rounded,
               title: 'JOB SPECIFIC INTERVIEW',
               subtitle: "Built for the exact job you're going for",
-              ribbon: _priceRibbon(label: 'FREE, TAILORED TO THE ROLE', bg: AppColors.ink, fg: Colors.white),
+              ribbon: _accessRibbon('UNLOCKED, TAILORED TO THE ROLE'),
               description: 'Give us the company, job title and level and get the exact '
                 'questions for that interview, built to match how this employer '
                 'actually hires.',
@@ -300,7 +311,7 @@ class _InterviewModeScreenState extends State<InterviewModeScreen>
                 'The exact questions for that job, not generic ones',
                 'Matched to junior, mid-level or senior difficulty',
                 'Walk in already knowing what is coming',
-                'Pay once, use it for every interview after, no limit',
+                'Included in Premium, use it for every interview, no limit',
               ],
               fadeStart: 0.2, fadeEnd: 0.6),
           ]))),

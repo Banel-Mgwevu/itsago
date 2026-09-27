@@ -1,10 +1,13 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'purchase_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import 'app_theme.dart';
 import 'main.dart';
 import 'terms_screen.dart';
@@ -32,9 +35,26 @@ class _AuthScreenState extends State<AuthScreen>
     begin: const Offset(0, 0.04), end: Offset.zero).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
 
-  bool _loading = false;
+  String? _loadingProvider; // 'google' | 'microsoft' | null
+  bool get _loading => _loadingProvider != null;
   bool _consentChecked = false;
   final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+
+  @override
+  void initState() {
+    super.initState();
+    // Warm up the GoogleSignIn plugin's native connection ahead of time.
+    // Without this, the first tap of "Continue with Google" can silently
+    // fail or do nothing while the underlying Android SDK finishes
+    // binding to Google Play Services - the second tap then works
+    // because that binding is already warm. signInSilently() just
+    // checks for an existing session; it doesn't show any UI or count
+    // as a real sign-in attempt, so it's safe to fire and forget here.
+    _googleSignIn.signInSilently().catchError((e) {
+      if (kDebugMode) print('GoogleSignIn warm-up (expected to often fail): $e');
+      return null;
+    });
+  }
 
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
@@ -52,26 +72,87 @@ class _AuthScreenState extends State<AuthScreen>
       transitionDuration: const Duration(milliseconds: 500)));
   }
 
+  /// Shared by every sign-in provider: records consent, syncs whatever
+  /// profile data ProfileSetupScreen held locally into this user's
+  /// Firestore doc, then navigates on. Keeping this in one place means
+  /// adding another provider later never risks re-implementing (and
+  /// drifting from) this logic.
+  Future<void> _completeSignIn(User? user) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('privacy_consent_accepted', true);
+    await prefs.setString(
+        'privacy_consent_accepted_at', DateTime.now().toIso8601String());
+
+    final uid = user?.uid;
+    final pendingJson = prefs.getString('pending_profile_data');
+    if (uid != null && pendingJson != null) {
+      try {
+        final profile = jsonDecode(pendingJson) as Map<String, dynamic>;
+        if (profile.isNotEmpty) {
+          profile['profileCompletedAt'] = FieldValue.serverTimestamp();
+          await FirebaseFirestore.instance.collection('users').doc(uid)
+              .set(profile, SetOptions(merge: true));
+        }
+      } catch (e) {
+        if (kDebugMode) print('Profile sync failed (non-fatal): $e');
+      }
+      await prefs.remove('pending_profile_data');
+    }
+
+    await _navigate();
+  }
+
   Future<void> _signInGoogle() async {
     if (_loading || !_consentChecked) return;
-    setState(() => _loading = true);
+    setState(() => _loadingProvider = 'google');
     try {
       final acct = await _googleSignIn.signIn();
-      if (acct == null) { setState(() => _loading = false); return; }
+      if (acct == null) {
+        print('Google sign-in: signIn() returned null (user cancelled, or a transient plugin hiccup)');
+        setState(() => _loadingProvider = null);
+        return;
+      }
       final auth = await acct.authentication;
-      await FirebaseAuth.instance.signInWithCredential(
+      final cred = await FirebaseAuth.instance.signInWithCredential(
         GoogleAuthProvider.credential(
           accessToken: auth.accessToken, idToken: auth.idToken));
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('privacy_consent_accepted', true);
-      await prefs.setString(
-          'privacy_consent_accepted_at', DateTime.now().toIso8601String());
-      await _navigate();
-    } catch (_) {
+      await _completeSignIn(cred.user);
+    } catch (e) {
+      print('Google sign-in error: $e');
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() => _loadingProvider = null);
         _err('SIGN-IN FAILED',
           'Could not sign in with Google. Please try again.');
+      }
+    }
+  }
+
+  Future<void> _signInMicrosoft() async {
+    if (_loading || !_consentChecked) return;
+    setState(() => _loadingProvider = 'microsoft');
+    try {
+      final provider = OAuthProvider('microsoft.com')
+        ..setCustomParameters({'prompt': 'select_account'});
+      final cred = await FirebaseAuth.instance.signInWithProvider(provider);
+      await _completeSignIn(cred.user);
+    } on FirebaseAuthException catch (e) {
+      // User backed out of the Microsoft sign-in page - not an error.
+      if (e.code == 'canceled' || e.code == 'web-context-canceled') {
+        if (mounted) setState(() => _loadingProvider = null);
+        return;
+      }
+      print('Microsoft sign-in FirebaseAuthException: code=${e.code} message=${e.message}');
+      if (mounted) {
+        setState(() => _loadingProvider = null);
+        _err('SIGN-IN FAILED',
+          'Could not sign in with Microsoft. Please try again.');
+      }
+    } catch (e) {
+      print('Microsoft sign-in error: $e');
+      if (mounted) {
+        setState(() => _loadingProvider = null);
+        _err('SIGN-IN FAILED',
+          'Could not sign in with Microsoft. Please try again.');
       }
     }
   }
@@ -131,7 +212,8 @@ class _AuthScreenState extends State<AuthScreen>
                   Text('SIGNING IN...',
                     style: AppText.label.copyWith(fontSize: 10)),
                   const SizedBox(height: 3),
-                  Text('Google', style: AppText.caption),
+                  Text(_loadingProvider == 'google' ? 'Google' : 'Microsoft',
+                    style: AppText.caption),
                 ])))),
 
         // Main content
@@ -213,8 +295,9 @@ class _AuthScreenState extends State<AuthScreen>
                     Expanded(child: RichText(text: TextSpan(
                       style: AppText.caption.copyWith(height: 1.45, color: AppColors.ink),
                       children: [
-                        const TextSpan(text: 'I agree to ITSAGO accessing my camera '
-                          'and microphone for practice interviews, as described in the '),
+                        const TextSpan(text: 'I agree to ITSAGO accessing my camera, '
+                          'microphone and profile answers for practice interviews and '
+                          'personalisation, as described in the '),
                         TextSpan(text: 'Privacy Policy',
                           style: const TextStyle(fontWeight: FontWeight.w800,
                             color: AppColors.blue, decoration: TextDecoration.underline),
@@ -252,6 +335,48 @@ class _AuthScreenState extends State<AuthScreen>
                             color: Colors.white)))),
                       const SizedBox(width: 12),
                       Text('CONTINUE WITH GOOGLE',
+                        style: AppText.button.copyWith(
+                          color: (_loading || !_consentChecked)
+                            ? Colors.white : AppColors.ink,
+                          letterSpacing: 1.5)),
+                    ]))),
+
+                const SizedBox(height: 12),
+
+                // Microsoft / Outlook sign-in button
+                GestureDetector(
+                  onTap: (_loading || !_consentChecked) ? null : _signInMicrosoft,
+                  child: Container(
+                    width: double.infinity, height: 56,
+                    decoration: BoxDecoration(
+                      color: (_loading || !_consentChecked) ? AppColors.dim : AppColors.white,
+                      border: AppBorders.ink2,
+                      boxShadow: (_loading || !_consentChecked)
+                        ? null : const [AppShadows.hard4]),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                      Container(width: 32, height: 32,
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: (_loading || !_consentChecked)
+                            ? AppColors.dim : Colors.white,
+                          border: Border.all(
+                            color: AppColors.ink, width: 1.5)),
+                        child: (_loading || !_consentChecked)
+                          ? null
+                          : GridView.count(
+                              crossAxisCount: 2,
+                              physics: const NeverScrollableScrollPhysics(),
+                              mainAxisSpacing: 1.5, crossAxisSpacing: 1.5,
+                              children: const [
+                                ColoredBox(color: Color(0xFFF25022)),
+                                ColoredBox(color: Color(0xFF7FBA00)),
+                                ColoredBox(color: Color(0xFF00A4EF)),
+                                ColoredBox(color: Color(0xFFFFB900)),
+                              ])),
+                      const SizedBox(width: 12),
+                      Text('CONTINUE WITH OUTLOOK',
                         style: AppText.button.copyWith(
                           color: (_loading || !_consentChecked)
                             ? Colors.white : AppColors.ink,

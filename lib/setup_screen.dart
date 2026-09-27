@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'app_theme.dart';
 import 'loading_screen.dart';
 import 'app_config.dart';
+import 'paywall.dart';
 
 class SetupScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -36,11 +37,20 @@ class _SetupScreenState extends State<SetupScreen>
     super.dispose();
   }
 
-  void _start() {
+  bool _starting = false;
+
+  Future<void> _start() async {
+    if (_starting) return;
     if (_companyCtrl.text.trim().isEmpty) {
       setState(() => _companyError = true); return;
     }
     setState(() => _companyError = false);
+
+    _starting = true;
+    final allowed = await Paywall.ensureAccess(context, PaywallFeature.interview);
+    _starting = false;
+    if (!allowed || !mounted) return;
+
     Navigator.of(context).push(PageRouteBuilder(
       pageBuilder: (_, __, ___) => LoadingScreen(
         cameras:            widget.cameras,

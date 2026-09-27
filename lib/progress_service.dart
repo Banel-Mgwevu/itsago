@@ -14,7 +14,10 @@ class ProgressService {
     final uid = _uid;
     if (uid == null) return;
 
-    final confs    = results.map((r) => (r['confidence'] as num).toDouble()).toList();
+    // Answers that couldn't be scored are left out of the average.
+    final confs    = results
+      .where((r) => r['scored'] != false)
+      .map((r) => (r['confidence'] as num).toDouble()).toList();
     final avgConf  = confs.isEmpty ? 0.0
       : confs.reduce((a, b) => a + b) / confs.length;
     final fillers  = results.fold<int>(0,
@@ -38,7 +41,8 @@ class ProgressService {
         'topImprovement':    aiFeedback?['topImprovement'] ?? '',
         'questions': results.map((r) => {
           'q':           r['question'],
-          'confidence':  r['confidence'],
+          'confidence':  r['scored'] == false ? null : r['confidence'],
+          'scored':      r['scored'] != false,
           'fillers':     (r['fillerWords'] as List).length,
           'words':       r['wordCount'],
           'sentiment':   r['sentiment'],

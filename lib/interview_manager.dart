@@ -83,6 +83,10 @@ class InterviewManager {
   // "Processing..." placeholder for the last answered question.
   final List<Future<void>> _pendingReviews = [];
 
+  /// Longest an answer can run before it stops automatically. People can
+  /// always tap COMPLETE ANSWER earlier.
+  static const int maxAnswerSeconds = 120;
+
   static const _coachingTips = [
     'Sit up straight and face the camera directly',
     'Take a slow deep breath - you have got this',
@@ -191,12 +195,7 @@ class InterviewManager {
     // it so the completion screen shows its real transcript/score
     // instead of the "Processing..." placeholder. Bounded so a slow
     // network call can never hang the exit.
-    if (_pendingReviews.isNotEmpty) {
-      try {
-        await Future.wait(_pendingReviews)
-            .timeout(const Duration(seconds: 6), onTimeout: () => []);
-      } catch (_) {}
-    }
+    await _awaitPendingReviews();
 
     // Fill all unanswered questions with zero scores
     for (int i = _results.length; i < questions.length; i++) {
@@ -434,21 +433,10 @@ class InterviewManager {
       }
 
       // Feature 2 - mid-answer coaching visual
+      // Only nudges on real silence (measured from the mic level) - no
+      // guessing at confidence while the person is still talking.
       if (_isRecording && !_coachMsgShown) {
-        if (_confidence < 50) {
-          _lowConfStreak++;
-          if (_lowConfStreak >= 4) {
-            _coachMsgShown  = true;
-            _midCoachingMsg = interviewStyle == 'pressure'
-              ? 'Be more specific - give concrete evidence'
-              : 'Take your time - breathe and speak clearly';
-            _push({'midCoachingMsg': _midCoachingMsg});
-            Timer(const Duration(seconds: 4), () {
-              _midCoachingMsg = '';
-              _push({'midCoachingMsg': ''});
-            });
-          }
-        } else if (_silenceSeconds >= 8 && _isSpeaking == false) {
+        if (_silenceSeconds >= 8 && _isSpeaking == false) {
           _coachMsgShown  = true;
           _midCoachingMsg = interviewStyle == 'pressure'
             ? 'I am waiting for your answer'
@@ -458,13 +446,11 @@ class InterviewManager {
             _midCoachingMsg = '';
             _push({'midCoachingMsg': ''});
           });
-        } else {
-          _lowConfStreak = 0;
         }
       }
 
       // Final countdown
-      if (_recDuration == 27 && !_showFinalCountdown) {
+      if (_recDuration == maxAnswerSeconds - 3 && !_showFinalCountdown) {
         _showFinalCountdown = true;
         _finalCountdown     = 3;
         _push({'showingFinalCountdown': true, 'finalCountdown': 3,
@@ -476,7 +462,7 @@ class InterviewManager {
         _finalCountdown--;
         _push({'finalCountdown': _finalCountdown});
       }
-      if (_recDuration >= 30) {
+      if (_recDuration >= maxAnswerSeconds) {
         t.cancel();
         _push({'showingFinalCountdown': false});
         // Direct call - bypasses guard so timer always moves to next question
@@ -540,6 +526,7 @@ class InterviewManager {
     final snapEyeFrames    = _camera.eyeContactFrames;
     final snapTotalFrames  = _camera.totalDetectionFrames;
     final snapFaceDetected = _camera.faceDetected;
+    final snapSpoke        = _firstSpeechMs > 0; // mic heard speech
     final snapHesitation   = (_firstSpeechMs > 0 && _qStartMs > 0)
         ? ((_firstSpeechMs - _qStartMs) / 1000.0).clamp(0.0, 60.0) : 0.0;
     // The live estimate tracked continuously during recording - used as
@@ -573,9 +560,11 @@ class InterviewManager {
       'eyeContactFrames':      snapEyeFrames,
       'totalDetectionFrames':  snapTotalFrames,
       'hesitationSeconds':     snapHesitation,
+      'scored':                true,
     });
 
     final reviewFuture = _runBackgroundReview(
+      spoke:          snapSpoke,
       resultIndex:    resultIndex,
       qIdx:           snapQIdx,
       question:       snapQuestion,
@@ -595,6 +584,7 @@ class InterviewManager {
   /// flow (kicked off from _doStopRecording right after _nextQuestion()
   /// already advanced), so none of it can ever block or delay moving on.
   Future<void> _runBackgroundReview({
+    required bool   spoke,
     required int    resultIndex,
     required int    qIdx,
     required String question,
@@ -609,14 +599,22 @@ class InterviewManager {
       String transcript = '';
       try {
         transcript = await _answerRec.stopAndTranscribe()
-            .timeout(const Duration(seconds: 25), onTimeout: () {
-          print('$tag: transcription timed out after 25s');
+            .timeout(const Duration(seconds: 60), onTimeout: () {
+          print('$tag: transcription timed out after 60s');
           return '';
         });
       } catch (e) {
         print('$tag: transcription threw: $e');
       }
-      if (transcript.trim().isEmpty) transcript = '[NO RESPONSE - SILENT]';
+      if (transcript.trim().isEmpty) {
+        if (spoke) {
+          // The mic heard them talking but we got no words back (network
+          // or transcription failure). Don't pretend they were silent.
+          _markUnscored(resultIndex, tag, 'transcription returned nothing');
+          return;
+        }
+        transcript = '[NO RESPONSE - SILENT]';
+      }
       print('$tag: transcript ready (${transcript.length} chars)');
       if (_disposed) {
         print('$tag: aborted - manager disposed before scoring');
@@ -627,17 +625,24 @@ class InterviewManager {
       final sentimentData  = _computeSentiment(transcript);
       final sentimentScore = sentimentData['sentimentScore'] as double;
 
-      double contentScore = 60.0;
+      double? scored;
       try {
-        contentScore = await _scoreContentFor(
+        scored = await _scoreContentFor(
             question: question, transcript: transcript)
-            .timeout(const Duration(seconds: 15), onTimeout: () {
-          print('$tag: content scoring timed out after 15s');
-          return 60.0;
+            .timeout(const Duration(seconds: 20), onTimeout: () {
+          print('$tag: content scoring timed out after 20s');
+          return null;
         });
       } catch (e) {
         print('$tag: content scoring threw: $e');
       }
+      if (scored == null) {
+        // No fake 60 - say honestly that this answer couldn't be scored.
+        _markUnscored(resultIndex, tag, 'content scoring failed',
+            transcript: transcript);
+        return;
+      }
+      final double contentScore = scored;
       print('$tag: content score = $contentScore');
       if (_disposed) {
         print('$tag: aborted - manager disposed after scoring');
@@ -654,11 +659,13 @@ class InterviewManager {
 
       final isNoResponse = transcript.startsWith('[') ||
           transcript.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length < 3;
-      final blended = ((contentScore * 0.45) +
-                       (voiceScore   * 0.15) +
-                       (postureScore * 0.15) +
-                       (eyeScore     * 0.15) +
-                       (toneScore    * 0.10)).clamp(0.0, 100.0);
+      // What they SAID counts most. Delivery and camera signals only
+      // nudge the score - front-camera eye contact in particular is noisy.
+      final blended = ((contentScore * 0.75) +
+                       (voiceScore   * 0.10) +
+                       (postureScore * 0.05) +
+                       (eyeScore     * 0.05) +
+                       (toneScore    * 0.05)).clamp(0.0, 100.0);
       final confidence = isNoResponse
           ? blended.clamp(2.0, 8.0)
           : contentScore < 15
@@ -685,6 +692,7 @@ class InterviewManager {
           'wordCount':      words,
           'wordsPerSecond': recDuration > 0 ? words / recDuration : 0.0,
           'fillerRatio':    words > 0 ? fillers.length / words : 0.0,
+          'scored':         true,
         };
         print('$tag: done - confidence=$confidence');
       } else {
@@ -702,10 +710,40 @@ class InterviewManager {
       print('$tag: CRASHED: $e\n$st');
       if (resultIndex < _results.length &&
           _results[resultIndex]['transcript'] == 'Processing...') {
-        _results[resultIndex] = {
-          ..._results[resultIndex],
-          'transcript': '[REVIEW FAILED - $e]',
-        };
+        _markUnscored(resultIndex, tag, 'review crashed: $e');
+      }
+    }
+  }
+
+  /// Marks an answer as "couldn't score this answer" instead of inventing
+  /// a number. Unscored answers are left out of every average.
+  void _markUnscored(int resultIndex, String tag, String reason,
+      {String transcript = ''}) {
+    print('$tag: UNSCORED - $reason');
+    if (resultIndex >= _results.length) return;
+    _results[resultIndex] = {
+      ..._results[resultIndex],
+      'transcript': transcript,
+      'confidence': 0.0,
+      'scored':     false,
+    };
+  }
+
+  /// Waits for background reviews (transcription + scoring) before the
+  /// results screen opens. Two-minute answers take longer to transcribe,
+  /// so this shows a "scoring your answers" screen instead of racing
+  /// ahead with half-finished results.
+  Future<void> _awaitPendingReviews() async {
+    if (_pendingReviews.isNotEmpty) {
+      _push({'finishingUp': true});
+      try {
+        await Future.wait(_pendingReviews)
+            .timeout(const Duration(seconds: 85), onTimeout: () => []);
+      } catch (_) {}
+    }
+    for (int i = 0; i < _results.length; i++) {
+      if (_results[i]['transcript'] == 'Processing...') {
+        _markUnscored(i, 'Review Q${i + 1}', 'still processing at results time');
       }
     }
   }
@@ -715,7 +753,7 @@ class InterviewManager {
 
   // - NEW: Content-first scoring -
 
-  Future<double> _scoreContentFor({
+  Future<double?> _scoreContentFor({
     required String question,
     required String transcript,
   }) async {
@@ -734,7 +772,7 @@ class InterviewManager {
           model: 'claude-haiku-4-5-20251001',
           maxTokens: 80,
           messages: [{'role': 'user', 'content':
-            'You are scoring a 30-second interview answer. '
+            'You are scoring a spoken interview answer (up to 2 minutes). '
             'Question: "$question"\n'
             'Answer: "$transcript"\n\n'
             'Score 0-100 on CONTENT ONLY.\n'
@@ -756,21 +794,21 @@ class InterviewManager {
             raw.replaceAll(RegExp(r'```[a-z]*'), '').replaceAll('```', '').trim());
         return (data['score'] as num).toDouble().clamp(0.0, 100.0);
     } catch (_) {}
-    return 60.0;
+    return null; // caller shows "couldn't score this answer"
   }
 
   /// VOICE: how the answer sounds - amount said for the time available,
-  /// speaking pace, and filler usage. Calibrated for 30-second answers
-  /// (a comfortable pace of ~2-2.5 words/sec gives 60-75 words in 30s).
+  /// speaking pace, and filler usage. Calibrated for answers of up to
+  /// 2 minutes (a comfortable ~2-2.5 words/sec).
   double _scoreVoiceFor({
     required int words,
     required int fillers,
     required int recDuration,
   }) {
-    final double wordScore = words < 12  ? 20.0
-                           : words < 30  ? 55.0
-                           : words <= 85 ? 100.0
-                           : 80.0; // slightly penalise rushing
+    final double wordScore = words < 12   ? 20.0
+                           : words < 30   ? 55.0
+                           : words <= 320 ? 100.0
+                           : 85.0; // very long - slightly penalise rambling
 
     double paceScore = 65.0;
     if (recDuration > 0 && words > 0) {
@@ -873,7 +911,7 @@ class InterviewManager {
 
 
   String _buildCoachingTip(int words, int fillers, double confidence) {
-    if (words < 10) return 'Too brief - even in 30 seconds, give at least one clear sentence that directly answers the question.';
+    if (words < 10) return 'Too brief - give at least one clear sentence that directly answers the question, then an example.';
     if (words < 20) return 'Add one specific example or detail to your next answer. A concrete point makes a short answer much stronger.';
     if (fillers > 5) return 'You used many filler words. Pause silently instead of saying um or like - a pause sounds more confident.';
     if (confidence < 45) return 'Focus on answering the question directly first, then add a supporting detail. Lead with your main point.';
@@ -1065,12 +1103,7 @@ class InterviewManager {
       // scoring) may still be running at this point - wait briefly for
       // it so the completion screen never shows a "Processing..."
       // placeholder. Bounded so a slow network call can't hang the exit.
-      if (_pendingReviews.isNotEmpty) {
-        try {
-          await Future.wait(_pendingReviews)
-              .timeout(const Duration(seconds: 6), onTimeout: () => []);
-        } catch (_) {}
-      }
+      await _awaitPendingReviews();
       onNavigateToCompletion(_results);
     }
   }

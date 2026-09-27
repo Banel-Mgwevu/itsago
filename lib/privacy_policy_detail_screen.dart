@@ -80,6 +80,13 @@ class PrivacyPolicyDetailScreen extends StatelessWidget {
                   'Access, correct or delete your data anytime from '
                   'Settings, or email support@itsago.co.za - we reply '
                   'within 72 hours.'),
+                _point(Icons.badge_rounded, AppColors.red,
+                  'Your profile',
+                  'When you sign up, we ask a few optional questions - '
+                  'province, employment status, age, education and target '
+                  'industry - to tailor your practice questions and '
+                  'pre-fill your CV. You can skip any of it, and it\'s '
+                  'never shared outside ITSAGO.'),
               ])),
 
             const SizedBox(height: 14),
@@ -98,6 +105,45 @@ class PrivacyPolicyDetailScreen extends StatelessWidget {
                     style: AppText.label.copyWith(color: AppColors.blue, fontSize: 9))),
                   const Icon(Icons.chevron_right_rounded, color: AppColors.dim, size: 18),
                 ]))),
+
+            const SizedBox(height: 28),
+
+            AppWidgets.sectionLabel('OTHER FEATURES', accent: AppColors.red),
+            const SizedBox(height: 10),
+            Text('Sign-in, CV Builder\n& AI Coach',
+              style: AppText.headline),
+            const SizedBox(height: 6),
+            Text('These features also use your data - here\'s how.',
+              style: AppText.caption.copyWith(height: 1.5)),
+
+            const SizedBox(height: 22),
+
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                border: Border.all(color: AppColors.ink, width: 2),
+                boxShadow: const [AppShadows.hard4]),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _point(Icons.login_rounded, AppColors.blue,
+                  'Signing in',
+                  'When you sign in with Google or Microsoft, we receive '
+                  'your name, email address and profile photo from that '
+                  'provider, to create and identify your account.'),
+                _point(Icons.description_rounded, AppColors.red,
+                  'CV Builder',
+                  'CVs you upload or build (including your name, contact '
+                  'details and work history) are stored securely to '
+                  'generate your optimised CV, and are only used for that '
+                  'purpose - never shared or used to train AI models.'),
+                _point(Icons.chat_bubble_rounded, AppColors.amber,
+                  'AI Coach chat',
+                  'Messages you send the AI Coach are sent to Google\'s '
+                  'Gemini AI to generate a reply. Chat history is kept so '
+                  'you can pick up the conversation later, and can be '
+                  'deleted anytime from Settings.'),
+              ])),
           ]))),
       ])));
   }

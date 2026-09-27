@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'paywall.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
@@ -52,17 +53,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   @override
   void initState() {
     super.initState();
-    _initPurchases();
     _init();
-  }
-
-  Future<void> _initPurchases() async {
-    final svc = PurchaseService();
-    svc.onPurchaseSuccess = () {
-      if (mounted) setState(() => _isPremium = true);
-    };
-    await svc.init();
-    if (mounted) setState(() => _isPremium = svc.isPremium);
   }
 
   File?  _file;
@@ -78,10 +69,8 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   String _processingMsg = 'Reading your CV...';
   double _genProgress   = 0.0;
   static const _designNames = ['EXECUTIVE', 'SPECTRUM', 'MINIMAL', 'GRID', 'UBUNTU', 'VIVID'];
-  static const _premiumDesigns = {1, 2, 3, 4, 5};
   String? _docErrorType;
   int _savedCount = 0;
-  bool _isPremium = false;
   String? _docErrorMsg;
 
   static const _sessionKey = 'ats_last_session';
@@ -576,16 +565,8 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
         itemCount: 6,
         itemBuilder: (ctx, i) {
           final isSelected = _selectedDesign == i;
-          final isPremiumDesign = _premiumDesigns.contains(i);
-          final isLocked = isPremiumDesign && !_isPremium;
           return GestureDetector(
-            onTap: () {
-              if (isLocked) {
-                _showPremiumDialog();
-                return;
-              }
-              setState(() => _selectedDesign = i);
-            },
+            onTap: () => setState(() => _selectedDesign = i),
             child: Container(margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(color: Colors.white,
                 border: Border.all(color: isSelected ? AppColors.blue : AppColors.ink, width: isSelected ? 3 : 2)),
@@ -1372,14 +1353,16 @@ Max 5 gaps. Return ONLY the JSON.''';
     final response = await CloudFunctionService.callClaude(
       model: _kClaudeModel, maxTokens: 2500,
       messages: [{'role': 'user', 'content':
-        'You are an ATS CV optimizer. Rewrite this CV to maximise ATS score.\n'
+        'You are an ATS CV optimizer and expert CV writer. Rewrite this CV to maximise ATS score AND make the candidate sound strong, capable and confident.\n'
         'Original data: ' + jsonEncode(_extracted) + '\n'
         'Additional answers: ' + answers + '\n'
         'Return ONLY valid JSON with these fields: name, headline, email, phone, location, linkedin, summary, experience, education, skills, certifications, achievements, awards, languages, atsScore.\n'
         'EXPERIENCE FORMAT: Each experience entry must be {"title":"","company":"","duration":"","bullets":["","",""]} - 3 to 4 short, punchy bullet points per role, NOT a single paragraph. Rewrite existing bullets/description text into this bullet format, strengthening the wording, without inventing achievements that aren\'t supported by the original data or answers.\n'
+        'STRONGER LANGUAGE RULE: Rewrite weak, passive or vague phrasing into confident, ownership-taking language. Replace phrases like "responsible for", "helped with", "assisted in", "worked on", "involved in", "duties included" with strong verbs that show the person DID and OWNED the work: led, drove, delivered, built, managed, resolved, improved, launched, coordinated, achieved, streamlined, grew. Where the original data has a number, percentage, timeframe or scale (team size, budget, volume, time saved), keep and foreground it - numbers make someone sound stronger. Never invent numbers or achievements that are not supported by the original data or answers - strengthen the WORDING, not the facts.\n'
         'CRITICAL: Preserve ALL certifications achievements and awards.\n'
         'GRADUATE RULE: Use academic projects WIL volunteer for experience if no formal work.\n'
-        'SUMMARY RULE: Write compelling 2-3 sentence summary never leave blank.\n'
+        'SUMMARY RULE: Write a compelling, confident 2-3 sentence summary that sounds like a capable professional, not a job description - never leave blank.\n'
+        'HEADLINE RULE: Make the headline sound like a strong professional title/positioning statement, not just a job title copy-paste.\n'
         'Use strong action verbs to start every bullet. Return ONLY the JSON.'}]);
 
 
@@ -1621,8 +1604,18 @@ Max 5 gaps. Return ONLY the JSON.''';
     pw.Text(t, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: b, letterSpacing: 1.5)),
   ]);
 
+  /// Generating/previewing a CV always stays free - this is the one gate
+  /// for every way the finished file can leave the app (download, share,
+  /// WhatsApp), so nobody can bypass the paywall by tapping "share"
+  /// instead of "download".
+  Future<bool> _canExport() async {
+    if (!mounted) return false;
+    return Paywall.ensureAccess(context, PaywallFeature.cvDownload);
+  }
+
   Future<void> _downloadPDF() async {
     if (_pdfs.isEmpty) return;
+    if (!await _canExport()) return;
     try {
       final dir  = await _saveDir();
       final name = '${_safeName()}_CV_${_designNames[_selectedDesign]}_${_ts()}.pdf';
@@ -1635,6 +1628,7 @@ Max 5 gaps. Return ONLY the JSON.''';
 
   Future<void> _downloadWord() async {
     if (_optimized.isEmpty) return;
+    if (!await _canExport()) return;
     try {
       final dir  = await _saveDir();
       final name = '${_safeName()}_CV_${_designNames[_selectedDesign]}_${_ts()}.docx';
@@ -1647,6 +1641,7 @@ Max 5 gaps. Return ONLY the JSON.''';
 
   Future<void> _share() async {
     if (_pdfs.isEmpty) return;
+    if (!await _canExport()) return;
     try {
       final tmp  = await getTemporaryDirectory();
       final file = File('${tmp.path}/${_safeName()}_CV.pdf');
@@ -1657,6 +1652,7 @@ Max 5 gaps. Return ONLY the JSON.''';
 
   Future<void> _shareWhatsApp() async {
     if (_pdfs.isEmpty) return;
+    if (!await _canExport()) return;
     try {
       final tmp  = await getTemporaryDirectory();
       final file = File('${tmp.path}/${_safeName()}_CV.pdf');
@@ -2002,64 +1998,6 @@ Max 5 gaps. Return ONLY the JSON.''';
     pw.SizedBox(width: 8),
     pw.Text(t, style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: purple, letterSpacing: 2)),
   ]);
-  void _showPremiumDialog() {
-    showDialog(context: context, builder: (_) => Dialog(
-      backgroundColor: Colors.transparent,
-      child: Container(
-        decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black, width: 2),
-          boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: double.infinity, color: const Color(0xFF1C1C3A), padding: const EdgeInsets.all(16),
-            child: const Column(children: [
-              Icon(Icons.lock_open_rounded, color: Color(0xFFFFD700), size: 32),
-              SizedBox(height: 8),
-              Text('LOOK SHARP. GET HIRED.', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)),
-              SizedBox(height: 4),
-              Text('This is the CV that gets you in the room', style: TextStyle(fontSize: 11, color: Colors.white70)),
-            ])),
-          Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-            const Text('Built to pass the bots, and built to make them remember your name once you are in front of them.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Color(0xFF1C1C3A), fontWeight: FontWeight.w600, height: 1.5)),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              color: Color(0xFFFFD700),
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Center(child: Text('LIMITED LAUNCH OFFER', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.black, letterSpacing: 2)))),
-            const SizedBox(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text('R59', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.grey, decoration: TextDecoration.lineThrough)),
-              const SizedBox(width: 12),
-              Text('R29', style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Color(0xFF1C1C3A))),
-            ]),
-            const SizedBox(height: 4),
-            const Text('Less than a taxi fare to work', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () async {
-                final svc = PurchaseService();
-                final started = await svc.buyPremiumTemplates();
-                if (mounted) {
-                  Navigator.pop(context);
-                  if (!started) {
-                    // error already shown via onPurchaseError callback
-                  }
-                }
-              },
-              child: Container(width: double.infinity, height: 52,
-                decoration: BoxDecoration(color: const Color(0xFF1C1C3A), border: Border.all(color: Colors.black, width: 2),
-                  boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
-                child: const Center(child: Text('GET JOB READY', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2))))),
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () async {
-                Navigator.pop(context);
-                await PurchaseService().restorePurchases();
-              },
-              child: const Text('Restore purchase', style: TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.underline))),
-          ])),
-        ]))));
-  }
-
   Widget _premiumFeature(IconData icon, String title, String sub) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: Row(children: [

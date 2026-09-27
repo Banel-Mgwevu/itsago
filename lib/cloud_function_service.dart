@@ -43,8 +43,11 @@ class CloudFunctionService {
     String encoding = 'LINEAR16',
   }) async {
     try {
+      // 2-minute answers are ~4 MB of audio - give slow mobile networks
+      // time to upload it (the default callable timeout is too short).
       final result = await _functions
-          .httpsCallable('transcribeAudio')
+          .httpsCallable('transcribeAudio',
+              options: HttpsCallableOptions(timeout: const Duration(seconds: 90)))
           .call({
         'audioBase64': audioBase64,
         'sampleRate': sampleRate,

@@ -82,13 +82,14 @@ class _LoadingScreenState extends State<LoadingScreen>
   /// the setup screen.
   Future<List<String>> _generateGeneric(
       String company, List<String> categories) async {
+    String raw = '';
     try {
       final catLabel = categories.isEmpty
           ? 'general workplace behavioural questions'
           : categories.map(_categoryLabel).join(', ');
       final res = await CloudFunctionService.callClaude(
           model: 'claude-haiku-4-5-20251001',
-          maxTokens: 300,
+          maxTokens: 600,
           messages: [{'role': 'user', 'content':
             'You are a warm, experienced interviewer at $company running a '
             'friendly practice interview. Write exactly 5 interview '
@@ -111,14 +112,17 @@ class _LoadingScreenState extends State<LoadingScreen>
           }],
         );
 
-        final raw   = CloudFunctionService.extractText(res);
+        raw = CloudFunctionService.extractText(res);
         final clean = raw.replaceAll(RegExp(r'```[a-z]*'), '').replaceAll('```', '').trim();
         final list  = jsonDecode(clean) as List;
         if (list.length >= 3) {
           return list.take(5).map((q) => q.toString()).toList();
         }
     } catch (e) {
-      if (kDebugMode) print('General question generation failed: $e');
+      if (kDebugMode) {
+        print('General question generation failed: $e');
+        print('Raw response was: $raw');
+      }
     }
     return QuestionService.generate(
         company: company, jobTitle: '', jobDescription: '',
@@ -138,17 +142,28 @@ class _LoadingScreenState extends State<LoadingScreen>
 
   Future<List<String>> _generate(
       String jobDesc, String company, String apiKey) async {
+    String raw = '';
     try {
       final res = await CloudFunctionService.callClaude(
           model: 'claude-haiku-4-5-20251001',
-          maxTokens: 300,
+          maxTokens: 600,
           messages: [{'role': 'user', 'content':
             'You are a warm, experienced interviewer at $company '
-            'interviewing a candidate for this role:\n'
-            '${jobDesc.length > 500 ? jobDesc.substring(0, 500) : jobDesc}\n\n'
+            'interviewing a candidate for this role. Read the role '
+            'information below carefully before writing questions:\n\n'
+            '${jobDesc.length > 2500 ? jobDesc.substring(0, 2500) : jobDesc}\n\n'
             'Write exactly 5 interview questions for a friendly practice '
             'session. Sound like a real person having a conversation, not '
             'a form or a template. Rules:\n'
+            '- Every question must be traceable to something specific in '
+            'the role information above (a named skill, tool, task, '
+            'responsibility, or requirement) - if the role information is '
+            'thin, reason about what that exact title/seniority actually '
+            'involves day-to-day rather than falling back to generic '
+            '"tell me about yourself" style questions\n'
+            '- Do NOT write questions so generic they could apply to any '
+            'job at any company - a reader should be able to tell what '
+            'role this interview is for just from the questions\n'
             '- Plain, natural spoken English - contractions are fine '
             '("what\'s", "you\'ve", "isn\'t")\n'
             '- One simple sentence per question, max 14 words\n'
@@ -160,25 +175,26 @@ class _LoadingScreenState extends State<LoadingScreen>
             'a real interviewer naturally would\n'
             '- Build up like a real interview conversation: Q1 is a warm, '
             'easy opener about the candidate; Q2 explores their interest '
-            'in this specific role; Q3 probes a skill or experience '
-            'directly relevant to the job description; Q4 goes one level '
-            'deeper with a real workplace scenario tied to this role; Q5 '
-            'is a warm closing question\n'
-            '- Reference specific skills or responsibilities from the job '
-            'description where natural, not just generic phrasing\n\n'
+            'in this specific role; Q3 probes a named skill or requirement '
+            'from the role information; Q4 goes one level deeper with a '
+            'real workplace scenario tied to this specific role; Q5 is a '
+            'warm closing question\n\n'
             'Return ONLY a valid JSON array of 5 strings. No markdown, no numbering.',
           }],
         );
 
       
-        final raw   = CloudFunctionService.extractText(res);
+        raw = CloudFunctionService.extractText(res);
         final clean = raw.replaceAll(RegExp(r'```[a-z]*'), '').replaceAll('```', '').trim();
         final list  = jsonDecode(clean) as List;
         if (list.length >= 3) {
           return list.take(5).map((q) => q.toString()).toList();
         }
     } catch (e) {
-      if (kDebugMode) print('Question generation failed: $e');
+      if (kDebugMode) {
+        print('Question generation failed: $e');
+        print('Raw response was: $raw');
+      }
     }
     return _fallback(company);
   }

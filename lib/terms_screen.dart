@@ -57,7 +57,7 @@ class _TermsScreenState extends State<TermsScreen>
                     Text('LAST UPDATED',
                       style: AppText.label.copyWith(
                         color: AppColors.amber)),
-                    Text('MAY 2025 · v3.0',
+                    Text('AUGUST 2026 · v4.0',
                       style: AppText.body.copyWith(color: Colors.white)),
                   ])),
                 ])),
@@ -99,7 +99,7 @@ class _TermsScreenState extends State<TermsScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                    Text('For questions, privacy requests, or legal enquiries:',
+                    Text('Data, privacy or account deletion requests, and general support:',
                       style: AppText.body),
                     const SizedBox(height: 12),
                     Container(padding: const EdgeInsets.all(12),
@@ -107,7 +107,7 @@ class _TermsScreenState extends State<TermsScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                        _link('📧', 'support@itsago.ai'),
+                        _link('📧', 'banele.mgwevu@itsago.app'),
                         const SizedBox(height: 6),
                         _link('🌐', 'www.itsago.ai'),
                         const SizedBox(height: 6),
@@ -115,6 +115,11 @@ class _TermsScreenState extends State<TermsScreen>
                         const SizedBox(height: 6),
                         _link('⚖️', 'www.itsago.ai/terms'),
                       ])),
+                    const SizedBox(height: 10),
+                    Text('To cancel a paid subscription, use your Google Play or App Store '
+                      'subscription settings directly - this keeps cancellation in your '
+                      'control at all times. Email us if you need help finding it.',
+                      style: AppText.caption.copyWith(height: 1.5)),
                   ])),
               ])),
 
@@ -136,7 +141,7 @@ class _TermsScreenState extends State<TermsScreen>
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('COMPLIANCE',
                     style: AppText.label.copyWith(color: AppColors.ink)),
-                  Text('GDPR · POPIA · CCPA · SOC 2',
+                  Text('POPIA (South Africa)',
                     style: AppText.caption.copyWith(
                       color: AppColors.ink,
                       fontWeight: FontWeight.w900)),
@@ -192,34 +197,34 @@ class _TermsScreenState extends State<TermsScreen>
       'color': AppColors.amber,
     },
     {
-      'title': 'GOOGLE SIGN-IN & ACCOUNT',
-      'body':  'We use Google Sign-In for authentication via Firebase Auth. By signing in you authorise us to access your basic Google profile (name, email, profile photo) to create and manage your ITSAGO account. You are responsible for maintaining the security of your account.',
+      'title': 'GOOGLE & MICROSOFT SIGN-IN',
+      'body':  'We use Google Sign-In or Microsoft Sign-In (your choice) for authentication via Firebase Auth. By signing in you authorise us to access your basic profile (name, email, profile photo) from your chosen provider to create and manage your ITSAGO account. You are responsible for maintaining the security of your account.',
       'color': AppColors.ink,
     },
     {
       'title': 'CAMERA & MICROPHONE ACCESS',
-      'body':  'ITSAGO requires access to your device camera and microphone during mock interview sessions. Camera is used for eye contact tracking and face detection. Microphone is used for speech-to-text transcription and filler word detection. This data is processed locally and is not transmitted or stored without your knowledge.',
+      'body':  'ITSAGO requires access to your device camera and microphone during mock interview sessions. Camera video is analysed on your device for eye contact and face detection - full video is not uploaded. Your spoken answers ARE sent to Google Cloud for speech-to-text transcription so we can score your answer; audio recordings are deleted after transcription completes.',
       'color': AppColors.red,
     },
     {
+      'title': 'GOOGLE CALENDAR INTEGRATION',
+      'body':  'The AI Coach can optionally connect to your Google Calendar (read-only access) to identify upcoming interviews by scanning event titles for interview-related keywords. Only the title and date of matching events - never the location, attendees, or description - is shared with Google\'s Gemini AI to help the coach give timely, relevant advice. Calendar data is not stored on our servers beyond your active session. You may revoke calendar access at any time through your Google account settings.',
+      'color': AppColors.amber,
+    },
+    {
       'title': 'CV UPLOAD & PROCESSING',
-      'body':  'When you use the ATS CV Builder, your CV is uploaded and processed by ITSAGO AI (powered by Anthropic Claude). Your CV data is used solely to generate optimised CV designs. We do not store, sell or share your CV with third parties. CV data is discarded after processing. You confirm any CV you upload belongs to you.',
+      'body':  'When you use the ATS CV Builder, your CV is uploaded and processed by Google\'s Gemini AI to generate optimised CV designs. Unlike a one-time processing tool, ITSAGO stores your CVs and generated designs in your account (the CV Library) so you can access them again later. You may delete any stored CV at any time. We do not sell or share your CV with third parties. You confirm any CV you upload belongs to you.',
       'color': AppColors.blue,
     },
     {
       'title': 'AI PROCESSING & THIRD PARTIES',
-      'body':  'ITSAGO uses the following third-party AI and cloud services to deliver its features: Anthropic Claude (interview coaching, CV optimisation, feedback generation), Microsoft Azure (text-to-speech voice output), Google Firebase (authentication, data storage), and Google ML Kit (face and eye detection). By using ITSAGO you consent to data being processed by these services in accordance with their respective privacy policies.',
+      'body':  'ITSAGO uses the following third-party services to deliver its features: Google Gemini (interview scoring, coaching feedback, CV optimisation, question generation), Google Cloud (speech-to-text transcription, text-to-speech voice output), and Google Firebase (authentication, data storage, Cloud Functions). By using ITSAGO you consent to data being processed by these services in accordance with their respective privacy policies.',
       'color': AppColors.amber,
     },
     {
       'title': 'USER DATA & PRIVACY',
-      'body':  'We collect interview session results, CV data, and usage analytics to provide personalised coaching. We never sell your personal information. Interview transcripts and scores are stored securely in Firebase under your account. You may request full deletion of your data at any time through the My Data & Privacy section of the app.',
+      'body':  'We collect interview session results, CV data, profile answers (province, employment status, education, and similar), and usage analytics to provide personalised coaching. We never sell your personal information. Interview transcripts, scores, and CVs are stored securely in Firebase under your account. You may request full deletion of your data at any time through the My Data & Privacy section of the app.',
       'color': AppColors.ink,
-    },
-    {
-      'title': 'CALENDAR INTEGRATION',
-      'body':  'The AI Coach feature may request access to your Google Calendar to identify upcoming interview dates and provide timely coaching. We only read interview-relevant events. Calendar data is never stored on our servers or shared with third parties. You may revoke calendar access at any time through your Google account settings.',
-      'color': AppColors.red,
     },
     {
       'title': 'PUSH NOTIFICATIONS',
@@ -228,32 +233,62 @@ class _TermsScreenState extends State<TermsScreen>
     },
     {
       'title': 'DATA RETENTION & DELETION',
-      'body':  'Interview sessions and CV records are retained for up to 30 days. You may delete your account and all associated data at any time via My Data & Privacy. Upon deletion, all personal data including CVs, sessions, and scores will be permanently removed within 30 days in compliance with POPIA.',
+      'body':  'CVs, interview sessions, and profile data are retained for as long as your account is active. You may delete your account and all associated data at any time via My Data & Privacy, or by emailing banele.mgwevu@itsago.app. Upon a deletion request, all personal data including CVs, sessions, and scores will be permanently removed within 30 days in compliance with POPIA.',
       'color': AppColors.amber,
     },
     {
-      'title': 'INTELLECTUAL PROPERTY',
-      'body':  'All ITSAGO content, AI models, CV designs, branding, and functionality are the intellectual property of ITSAGO AI Systems. You may not copy, reverse-engineer, resell or redistribute any part of the service. Generated CVs and interview feedback belong to the user who created them.',
+      'title': 'ACCEPTABLE USE',
+      'body':  'You agree not to: use ITSAGO for any unlawful purpose; upload a CV or content that is not your own or that infringes someone else\'s rights; attempt to reverse-engineer, scrape, or extract the underlying AI models or system prompts; use automated tools (bots) to interact with the service; interfere with or disrupt the service or its servers; or attempt to bypass usage limits or subscription requirements. Violation may result in suspension or termination of your account without refund.',
+      'color': AppColors.red,
+    },
+    {
+      'title': 'LICENSE TO YOUR CONTENT',
+      'body':  'You retain ownership of any CV, answer, or content you provide. By using ITSAGO, you grant us a limited licence to process, store, and display that content solely to provide the service to you (e.g. generating your CV designs, scoring your answers, showing your session history). This licence ends when you delete the content or your account, except where we are required to retain data by law.',
+      'color': AppColors.blue,
+    },
+    {
+      'title': 'ACCOUNT SUSPENSION & TERMINATION',
+      'body':  'We may suspend or terminate your account if you violate these Terms, engage in fraudulent or abusive behaviour, or if required by law. Where reasonably possible, we will notify you first. If your account is terminated for cause, any active subscription may be cancelled without refund for the remaining period. You may also close your own account at any time.',
       'color': AppColors.ink,
     },
     {
-      'title': 'FREE SERVICE & FAIR USE',
-      'body':  'ITSAGO is currently free to use. We reserve the right to introduce paid tiers, usage limits, or premium features in future. We may impose reasonable usage limits (such as CV upload limits) to ensure fair access for all users. Abuse of the free service may result in account suspension.',
+      'title': 'SERVICE AVAILABILITY',
+      'body':  'ITSAGO depends on third-party services (including Google Gemini and Google Cloud) to function. We do not guarantee uninterrupted availability and are not liable for outages, delays, or errors caused by these third-party providers or other events outside our reasonable control (including load-shedding, network outages, or force majeure events).',
+      'color': AppColors.amber,
+    },
+    {
+      'title': 'INDEMNIFICATION',
+      'body':  '[REQUIRES LEGAL REVIEW - standard protective clause, wording below is a starting point] You agree to indemnify and hold ITSAGO harmless from any claims, damages, or expenses arising from your misuse of the service, your violation of these Terms, or content you upload that infringes the rights of a third party.',
+      'color': AppColors.red,
+    },
+    {
+      'title': 'INTELLECTUAL PROPERTY',
+      'body':  'All ITSAGO content, AI models, CV designs, branding, and functionality are the intellectual property of ITSAGO. You may not copy, reverse-engineer, resell or redistribute any part of the service. Generated CVs and interview feedback belong to the user who created them.',
+      'color': AppColors.ink,
+    },
+    {
+      'title': 'SUBSCRIPTIONS & PAYMENTS',
+      'body':  '[TO CONFIRM WITH LEGAL/BILLING BEFORE PUBLISHING] Certain features (including video mock interviews) require an active paid subscription. Subscriptions are billed [monthly, at R__/month] via [Google Play / Apple App Store]. You may cancel at any time; cancellation takes effect at the end of the current billing period, and no partial refunds are given for unused time within a period, except where required by law. Some features (such as Premium CV Templates) are available as a one-time purchase that does not expire. Prices may change with reasonable prior notice.',
       'color': AppColors.red,
     },
     {
       'title': 'DISCLAIMER & LIMITATION OF LIABILITY',
-      'body':  'ITSAGO is provided "as is" without warranties of any kind. We do not guarantee specific interview outcomes, job offers, or CV success rates. Our AI feedback is intended as coaching guidance only, not professional career advice. Our total liability shall not exceed ZAR 500 or the amount paid by you in the preceding 12 months, whichever is greater.',
+      'body':  '[REQUIRES LEGAL REVIEW - liability cap and specific wording below are placeholders, not final] ITSAGO is provided "as is" without warranties of any kind. We do not guarantee specific interview outcomes, job offers, or CV success rates. Our AI feedback is intended as coaching guidance only, not professional career advice. Our total liability shall not exceed the amount paid by you in the preceding 12 months.',
       'color': AppColors.blue,
     },
     {
       'title': 'GOVERNING LAW',
-      'body':  'These Terms are governed by the laws of the Republic of South Africa. Any disputes shall be resolved in the courts of the Western Cape, South Africa. ITSAGO complies with the Protection of Personal Information Act (POPIA), the General Data Protection Regulation (GDPR), and the California Consumer Privacy Act (CCPA).',
+      'body':  '[REQUIRES LEGAL REVIEW - jurisdiction below is a placeholder] These Terms are governed by the laws of the Republic of South Africa. ITSAGO complies with the Protection of Personal Information Act (POPIA).',
       'color': AppColors.amber,
     },
     {
+      'title': 'GENERAL PROVISIONS',
+      'body':  'If any part of these Terms is found unenforceable, the rest remains in full effect. These Terms are the entire agreement between you and ITSAGO regarding the service. Our failure to enforce any provision is not a waiver of our right to do so later. We may assign these Terms in connection with a merger, acquisition, or sale of assets; you may not assign your rights under these Terms without our consent.',
+      'color': AppColors.blue,
+    },
+    {
       'title': 'CHANGES TO TERMS',
-      'body':  'We may update these Terms at any time. Material changes will be communicated through an in-app notice at least 7 days before taking effect. Continued use of ITSAGO after changes constitutes your acceptance of the updated Terms. The current version is always available within the app.',
+      'body':  'We may update these Terms at any time. Material changes - including changes to pricing or which features require a subscription - will be communicated through an in-app notice at least 7 days before taking effect. Continued use of ITSAGO after changes constitutes your acceptance of the updated Terms. The current version is always available within the app.',
       'color': AppColors.ink,
     },
   ];

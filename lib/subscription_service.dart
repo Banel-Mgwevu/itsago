@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_android/in_app_purchase_android.dart'
+    show InAppPurchaseAndroidPlatformAddition, GooglePlayProductDetails;
+import 'package:in_app_purchase_android/billing_client_wrappers.dart'
+    show PurchaseStateWrapper;
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
 import 'package:in_app_purchase_storekit/store_kit_wrappers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,14 +24,44 @@ class SubscriptionService {
   late StreamSubscription<List<PurchaseDetails>> _subscription;
   bool _isAvailable = false;
   List<ProductDetails> _products = [];
+  bool _listening = false;
+
+  /// Broadcast stream the paywall modal listens to while it is open.
+  final StreamController<SubscriptionEvent> _events =
+      StreamController<SubscriptionEvent>.broadcast();
+  Stream<SubscriptionEvent> get events => _events.stream;
+
+  /// The R80/month base plan as loaded from Google Play (null until loaded).
+  ProductDetails? get monthlyProduct {
+    for (final p in _products) {
+      if (p.id == monthlyProductId) return p;
+    }
+    return null;
+  }
   
-  // Updated Product IDs to match your Play Console configuration
-  static const String monthlyProductId = 'itsago_prod';
+  // Play Console: subscription "itsago_paid", base plan "itsagopaid"
+  // (monthly, auto-renewing, R80/month). The price shown in the app comes
+  // straight from Google Play, so changing it in Play Console is enough.
+  static const String monthlyProductId = 'itsago_paid';
+  static const String monthlyBasePlanId = 'itsagopaid';
+
+  /// Kept only for backwards compatibility with the old product id. It is
+  /// no longer sold, but anyone still holding an active one keeps premium.
   static const String annualProductId = 'itsago_annual_prod';
-  
+  static const Set<String> _kLegacyProductIds = <String>{
+    'itsago_prod',
+    'itsago_annual_prod',
+  };
+
+  /// Products the paywall loads and sells.
   static const Set<String> _kProductIds = <String>{
     monthlyProductId,
-    annualProductId,
+  };
+
+  /// Every product id that grants premium (current + legacy).
+  static final Set<String> _kEntitlementProductIds = <String>{
+    ..._kProductIds,
+    ..._kLegacyProductIds,
   };
 
   // Callbacks
@@ -59,15 +93,22 @@ class SubscriptionService {
       return;
     }
 
-    // Listen to purchase updates
-    _subscription = _inAppPurchase.purchaseStream.listen(
-      _onPurchaseUpdate,
-      onDone: _updateStreamOnDone,
-      onError: _updateStreamOnError,
-    );
+    // Listen to purchase updates (only once, even if initialize runs again)
+    if (!_listening) {
+      _subscription = _inAppPurchase.purchaseStream.listen(
+        _onPurchaseUpdate,
+        onDone: _updateStreamOnDone,
+        onError: _updateStreamOnError,
+      );
+      _listening = true;
+    }
 
     await _loadProducts();
     await _checkExistingPurchases();
+
+    // Monthly subscriptions can lapse - make sure premium is switched off
+    // for anyone whose subscription is no longer active on Google Play.
+    await _refreshEntitlement();
     
     // Sync with Firestore if user is authenticated
     await _syncWithFirestore();
@@ -87,7 +128,7 @@ class SubscriptionService {
         }
       }
       
-      _products = response.productDetails;
+      _products = _pickBasePlanOffers(response.productDetails);
       
       if (kDebugMode) {
         print('SubscriptionService: Loaded ${_products.length} products');
@@ -100,6 +141,45 @@ class SubscriptionService {
         print('SubscriptionService: Error loading products: $e');
       }
       rethrow;
+    }
+  }
+
+  /// On Android, Google Play returns one ProductDetails per base plan/offer
+  /// of a subscription. Keep exactly one entry per product: the
+  /// "itsagopaid" base plan (the plain R80/month price, no promo offer).
+  List<ProductDetails> _pickBasePlanOffers(List<ProductDetails> all) {
+    if (!Platform.isAndroid) return all;
+
+    final Map<String, ProductDetails> picked = {};
+    for (final product in all) {
+      if (product is GooglePlayProductDetails &&
+          product.subscriptionIndex != null) {
+        final offer = product.productDetails
+            .subscriptionOfferDetails![product.subscriptionIndex!];
+        final isWantedBasePlan = product.id == monthlyProductId
+            ? offer.basePlanId == monthlyBasePlanId
+            : true;
+        // offerId == null means the base plan itself, not a promo offer.
+        if (isWantedBasePlan && offer.offerId == null) {
+          picked[product.id] = product;
+        }
+      } else {
+        picked.putIfAbsent(product.id, () => product);
+      }
+    }
+    return picked.values.toList();
+  }
+
+  /// Makes sure the store is connected and the subscription is loaded.
+  /// Safe to call many times - the paywall calls it before every purchase,
+  /// so a failed start-up (no network, Play Store updating) heals itself.
+  Future<void> ensureReady() async {
+    if (!_isAvailable) {
+      await initialize();
+      return;
+    }
+    if (monthlyProduct == null) {
+      await _loadProducts();
     }
   }
 
@@ -187,6 +267,7 @@ class SubscriptionService {
         print('SubscriptionService: Checking subscription status...');
       }
       await _checkExistingPurchases();
+      await _refreshEntitlement();
       await _syncWithFirestore();
     } catch (e) {
       if (kDebugMode) {
@@ -447,12 +528,15 @@ class SubscriptionService {
         await _activatePremium(purchaseDetails);
         onPurchaseSuccess?.call();
         onPremiumStatusChanged?.call(true);
+        _events.add(const SubscriptionEvent(SubscriptionEventType.success));
         
         if (kDebugMode) {
           print('SubscriptionService: Purchase successful for ${purchaseDetails.productID}');
         }
       } else {
         onPurchaseError?.call('Purchase verification failed');
+        _events.add(const SubscriptionEvent(SubscriptionEventType.error,
+            "Google Play couldn't confirm this payment. Tap Restore purchase."));
       }
       
     } else if (purchaseDetails.status == PurchaseStatus.error) {
@@ -464,12 +548,17 @@ class SubscriptionService {
       }
       
       onPurchaseError?.call(errorMessage);
+      _events.add(SubscriptionEvent(SubscriptionEventType.error, errorMessage));
       
+    } else if (purchaseDetails.status == PurchaseStatus.pending) {
+      _events.add(const SubscriptionEvent(SubscriptionEventType.pending));
+
     } else if (purchaseDetails.status == PurchaseStatus.canceled) {
       if (kDebugMode) {
         print('SubscriptionService: Purchase cancelled by user');
       }
       onPurchaseError?.call('Purchase cancelled');
+      _events.add(const SubscriptionEvent(SubscriptionEventType.cancelled));
     }
 
     if (purchaseDetails.pendingCompletePurchase) {
@@ -490,7 +579,7 @@ class SubscriptionService {
     
     try {
       // Basic validation - check if it's one of our products
-      if (!_kProductIds.contains(purchaseDetails.productID)) {
+      if (!_kEntitlementProductIds.contains(purchaseDetails.productID)) {
         return false;
       }
 
@@ -540,6 +629,80 @@ class SubscriptionService {
     }
   }
 
+  /// Asks Google Play which subscriptions are active right now. Play only
+  /// returns subscriptions that are still paid up (including grace period),
+  /// so if none of ours come back the user cancelled and it has run out.
+  /// Fails open: if Play can't be reached, nothing is changed.
+  Future<void> _refreshEntitlement() async {
+    if (!Platform.isAndroid || !_isAvailable) return;
+
+    try {
+      final addition = _inAppPurchase
+          .getPlatformAddition<InAppPurchaseAndroidPlatformAddition>();
+      final response = await addition.queryPastPurchases();
+
+      if (response.error != null) {
+        if (kDebugMode) {
+          print('SubscriptionService: Could not query Play purchases '
+              '(${response.error!.message}) - leaving premium unchanged');
+        }
+        return;
+      }
+
+      final hasActiveSubscription = response.pastPurchases.any((p) =>
+          _kEntitlementProductIds.contains(p.productID) &&
+          p.billingClientPurchase.purchaseState == PurchaseStateWrapper.purchased);
+
+      final prefs = await SharedPreferences.getInstance();
+      final wasPremium = prefs.getBool('is_premium') ?? false;
+      final firestoreData = await _getSubscriptionFromFirestore();
+      final firestorePremium = (firestoreData?['isPremium'] ?? false) == true &&
+          (firestoreData?['isActive'] ?? false) == true;
+
+      // Don't touch premium that was bought on an iPhone.
+      final boughtOnIos = firestoreData?['platform'] == 'ios';
+
+      if (!hasActiveSubscription && !boughtOnIos && (wasPremium || firestorePremium)) {
+        await _deactivatePremium();
+        onPremiumStatusChanged?.call(false);
+        if (kDebugMode) {
+          print('SubscriptionService: No active subscription on Play - premium switched off');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('SubscriptionService: Error refreshing entitlement: $e');
+      }
+    }
+  }
+
+  Future<void> _deactivatePremium() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_premium', false);
+
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('subscriptions')
+          .doc('current')
+          .set({
+        'userId': user.uid,
+        'isPremium': false,
+        'isActive': false,
+        'platform': 'android',
+        'expiredAt': FieldValue.serverTimestamp(),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (kDebugMode) {
+        print('SubscriptionService: Error deactivating premium in Firestore: $e');
+      }
+    }
+  }
+
   // Method to handle user authentication changes
   Future<void> onUserAuthChanged(User? user) async {
     if (user != null) {
@@ -577,8 +740,19 @@ class SubscriptionService {
           _inAppPurchase.getPlatformAddition<InAppPurchaseStoreKitPlatformAddition>();
       iosPlatformAddition.setDelegate(null);
     }
-    _subscription.cancel();
+    if (_listening) {
+      _subscription.cancel();
+      _listening = false;
+    }
   }
+}
+
+enum SubscriptionEventType { success, cancelled, pending, error }
+
+class SubscriptionEvent {
+  final SubscriptionEventType type;
+  final String? message;
+  const SubscriptionEvent(this.type, [this.message]);
 }
 
 // Enhanced Premium status utility class with Firestore support

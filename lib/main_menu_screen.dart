@@ -1,6 +1,8 @@
 ﻿import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:io' show Platform;
 import 'app_theme.dart';
 import 'remote_config_service.dart';
 import 'package:flutter/services.dart';
@@ -533,6 +535,26 @@ class _MainMenuScreenState extends State<MainMenuScreen>
 
   // ---- DRAWER ------------------------------
   // ---- DRAWER ------------------------------
+  /// Cancelling or changing a subscription must go through the store's
+  /// own settings, not a custom in-app flow - both Google Play and the
+  /// App Store require this and will reject an app that tries to hide
+  /// or replace it. This just opens the right one for the platform.
+  Future<void> _openManageSubscription() async {
+    final uri = Platform.isIOS
+      ? Uri.parse('https://apps.apple.com/account/subscriptions')
+      : Uri.parse('https://play.google.com/store/account/subscriptions'
+          '?package=com.itsago.interviewai&sku=itsago_paid');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not open subscription settings - '
+            'find it under your phone\'s Play Store / App Store account menu.')));
+      }
+    }
+  }
+
   Widget _drawer() => Drawer(
     backgroundColor: Colors.white,
     child: Column(children: [
@@ -559,6 +581,10 @@ class _MainMenuScreenState extends State<MainMenuScreen>
             Navigator.pop(context);
             if (mounted) _push(AiCoachScreen(cameras: widget.cameras));
           }),
+        const SizedBox(height: 10),
+        _dItem(icon: Icons.workspace_premium_rounded, title: 'MANAGE SUBSCRIPTION',
+          sub: 'View, change or cancel your plan', accent: _red,
+          onTap: () { Navigator.pop(context); _openManageSubscription(); }),
         const SizedBox(height: 10),
         _dItem(icon: Icons.info_outline_rounded, title: 'ABOUT ITSAGO',
           sub: 'About the app', accent: _amber,

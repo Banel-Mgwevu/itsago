@@ -32,8 +32,9 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
   final SubscriptionService _subscriptionService = SubscriptionService();
 
   // Updated Product identifiers to match your Play Console setup
-  static const String monthlyProductId = 'itsago_prod';  // Updated to match Play Console
-  static const String annualProductId = 'itsago_annual_prod';  // You'll need to create this in Play Console
+  // Single source of truth lives in SubscriptionService (itsago_paid / itsagopaid, R80/month)
+  static const String monthlyProductId = SubscriptionService.monthlyProductId;
+  static const String annualProductId = SubscriptionService.annualProductId;  // not sold - card stays hidden
 
   @override
   void initState() {
@@ -165,7 +166,7 @@ class _UpgradePremiumScreenState extends State<UpgradePremiumScreen>
       return product.price;
     }
     // Fallback prices - update these based on your actual pricing
-    return planId == 'monthly' ? '\$19.99' : '\$199.99';
+    return planId == 'monthly' ? 'R80.00' : '';
   }
 
   @override

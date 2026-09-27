@@ -222,39 +222,21 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   static final List<_Slide> _slides = [
     _Slide(
       accent:  AppColors.ink,
-      icon:    Icons.waving_hand_rounded,
+      icon:    Icons.rocket_launch_rounded,
       tagline: 'WELCOME',
       title:   'MEET\nITSAGO',
-      desc:    'Your AI interview coach and CV builder. Get hired faster, starting today.',
-      bullets: ['Practice anytime, anywhere', 'AI that adapts to your role', 'Free to use']),
+      desc:    'Your AI interview coach and CV builder. Get hired faster, starting today — free, no credit card needed.',
+      bullets: ['Practice anytime, anywhere', 'AI that adapts to your role', 'Built in South Africa 🇿🇦']),
     _Slide(
       accent:  AppColors.red,
-      icon:    Icons.video_camera_front_rounded,
-      tagline: 'FEATURE 01',
-      title:   'PRACTICE\nINTERVIEWS',
-      desc:    'Realistic AI-powered mock sessions tailored to your industry and target company.',
-      bullets: ['Real-time video & audio analysis', 'Industry-specific questions', 'Instant scoring & feedback']),
-    _Slide(
-      accent:  AppColors.blue,
-      icon:    Icons.psychology_rounded,
-      tagline: 'FEATURE 02',
-      title:   'AI\nCOACH',
-      desc:    'Your personal AI career coach. Get tailored advice, interview tips and strategies — anytime you need them.',
-      bullets: ['Personalised interview strategy', 'Industry-specific tips', '24/7 AI career support']),
-    _Slide(
-      accent:  AppColors.red,
-      icon:    Icons.auto_fix_high_rounded,
-      tagline: 'FEATURE 03',
-      title:   'ATS CV\nBUILDER',
-      desc:    'Upload your CV and our AI rewrites it to beat ATS filters — then builds 4 job-ready designs you can send today.',
-      bullets: ['4 Bauhaus-inspired templates', 'ATS compatibility scoring', 'Download PDF & Word']),
-    _Slide(
-      accent:  AppColors.red,
-      icon:    Icons.rocket_launch_rounded,
-      tagline: 'LET\'S GO',
-      title:   'YOU\'RE\nREADY',
-      desc:    'Everything you need to walk into your next interview with total confidence.',
-      bullets: ['Start practising in seconds', 'No credit card needed', 'Built in South Africa 🇿🇦']),
+      icon:    Icons.auto_awesome_rounded,
+      tagline: 'HOW IT WORKS',
+      title:   'EVERYTHING\nYOU NEED',
+      desc:    'Three tools working together to get you interview-ready.',
+      bullets: [
+        'Practice Interviews — realistic AI mock sessions with instant scoring',
+        'AI Coach — personalised tips and strategy, anytime',
+        'CV Builder — upload your CV, get 4 ATS-ready designs back']),
   ];
 }
 

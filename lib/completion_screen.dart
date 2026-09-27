@@ -54,11 +54,15 @@ class _CompletionScreenState extends State<CompletionScreen>
         final fr  = (((r['fillerRatio']   ?? 0) as num) * 100).toStringAsFixed(0);
         sb.write('Q${r["questionNumber"]}: ${r["question"]}\n');
         sb.write('Answer: ${r["transcript"]}\n');
-        sb.write('Stats: ${(r["confidence"] as num).round()}% confidence, '
+        if (r['scored'] == false) {
+          sb.write('Stats: this answer could not be scored (technical issue) - do not judge it.\n\n');
+          continue;
+        }
+        sb.write('Stats: ${(r["confidence"] as num).round()}% score, '
             '${(r["fillerWords"] as List).length} fillers, '
             '${r["wordCount"]} words, $wps words/sec, $fr% filler ratio\n\n');
       }
-      sb.write('IMPORTANT: Each answer was limited to 20 seconds (25-45 words max). Score fairly for that constraint.\n'
+      sb.write('Each answer could be up to 2 minutes long.\n'
       'Focus primarily on CONTENT - did they answer the question with a specific point?\n'
       'Delivery (pace, fillers) is secondary. Be encouraging - they are practising.\n'
       'Return ONLY valid JSON, no markdown:\n');
@@ -80,9 +84,7 @@ class _CompletionScreenState extends State<CompletionScreen>
         final data  = jsonDecode(clean) as Map<String, dynamic>;
         if (mounted) setState(() { _aiFeedback = data; _loadingFeedback = false; });
         // Trigger score-based notification
-        final avgConfidence = widget.allResults.isEmpty ? 0.0
-            : widget.allResults.fold<double>(0, (v, r) => v + (r['confidence'] as num).toDouble())
-                / widget.allResults.length;
+        final avgConfidence = _avgConfidence;
         await NotificationService().onInterviewCompleted(
             avgScore:      avgConfidence,
             company:       widget.company,
@@ -96,9 +98,7 @@ class _CompletionScreenState extends State<CompletionScreen>
         return;
     } catch (_) {
       try {
-        final avgConf = widget.allResults.isEmpty ? 0.0
-            : widget.allResults.fold<double>(0, (v, r) => v + (r['confidence'] as num).toDouble())
-                / widget.allResults.length;
+        final avgConf = _avgConfidence;
         await NotificationService().onInterviewCompleted(
             avgScore: avgConf, company: widget.company, questionCount: widget.allResults.length);
         await ProgressService.saveSession(
@@ -197,11 +197,16 @@ class _CompletionScreenState extends State<CompletionScreen>
   }
 
   // - Computed stats -
+  /// Answers that actually got a score. Answers we couldn't score
+  /// (network/transcription failure) are left out of every average.
+  List<Map<String, dynamic>> get _scored =>
+      widget.allResults.where((r) => r['scored'] != false).toList();
+
   double get _avgConfidence {
-    if (widget.allResults.isEmpty) return 0;
-    final sum = widget.allResults
-        .fold<double>(0, (v, r) => v + (r['confidence'] as num).toDouble());
-    return sum / widget.allResults.length;
+    final s = _scored;
+    if (s.isEmpty) return 0;
+    final sum = s.fold<double>(0, (v, r) => v + (r['confidence'] as num).toDouble());
+    return sum / s.length;
   }
 
   double get _avgEyeContact {
@@ -352,8 +357,8 @@ class _CompletionScreenState extends State<CompletionScreen>
 
   // - Metric 3: Consistency score -
   double get _consistencyScore {
-    if (widget.allResults.length < 2) return 100;
-    final scores = widget.allResults
+    if (_scored.length < 2) return 100;
+    final scores = _scored
       .map((r) => (r['confidence'] as num).toDouble()).toList();
     final avg  = scores.fold<double>(0, (a, b) => a + b) / scores.length;
     final variance = scores.fold<double>(0, (a, b) => a + (b - avg) * (b - avg))
@@ -388,10 +393,10 @@ class _CompletionScreenState extends State<CompletionScreen>
 
   // - Metric 4: Most improved / best question -
   Map<String, dynamic>? get _bestQuestion {
-    if (widget.allResults.isEmpty) return null;
+    if (_scored.isEmpty) return null;
     Map<String, dynamic>? best;
     double bestScore = -1;
-    for (final r in widget.allResults) {
+    for (final r in _scored) {
       final s = (r['confidence'] as num).toDouble();
       if (s > bestScore) { bestScore = s; best = r; }
     }
@@ -399,14 +404,15 @@ class _CompletionScreenState extends State<CompletionScreen>
   }
 
   Map<String, dynamic>? get _mostImproved {
-    if (widget.allResults.length < 2) return null;
+    final list = _scored;
+    if (list.length < 2) return null;
     Map<String, dynamic>? improved;
     double bestGain = -double.infinity;
-    for (int i = 1; i < widget.allResults.length; i++) {
-      final prev = (widget.allResults[i-1]['confidence'] as num).toDouble();
-      final curr = (widget.allResults[i]['confidence'] as num).toDouble();
+    for (int i = 1; i < list.length; i++) {
+      final prev = (list[i-1]['confidence'] as num).toDouble();
+      final curr = (list[i]['confidence'] as num).toDouble();
       final gain = curr - prev;
-      if (gain > bestGain) { bestGain = gain; improved = widget.allResults[i]; }
+      if (gain > bestGain) { bestGain = gain; improved = list[i]; }
     }
     return bestGain > 5 ? improved : null;
   }
@@ -516,7 +522,7 @@ class _CompletionScreenState extends State<CompletionScreen>
                               style: AppText.headline.copyWith(
                                 color: _gradeColor)),
                             const SizedBox(height: 6),
-                            Text('${_avgConfidence.round()}% CONFIDENCE',
+                            Text('${_avgConfidence.round()}% OVERALL SCORE',
                               style: AppText.title.copyWith(
                                 color: AppColors.ink)),
                             const SizedBox(height: 8),
@@ -560,6 +566,8 @@ class _CompletionScreenState extends State<CompletionScreen>
                 ...widget.allResults.asMap().entries.map((e) {
                   final i = e.key; final r = e.value;
                   final conf = (r['confidence'] as num).toDouble();
+                  final isScored = r['scored'] != false;
+                  final rowColor = isScored ? _confColor(conf) : AppColors.dim;
                   final expanded = _expandedQ == i;
                   return Padding(
                   padding: EdgeInsets.zero,
@@ -574,20 +582,20 @@ class _CompletionScreenState extends State<CompletionScreen>
                           color: AppColors.white,
                           border: Border.all(
                             color: expanded
-                              ? _confColor(conf) : AppColors.mist,
+                              ? rowColor : AppColors.mist,
                             width: expanded ? 2 : 1.5),
                           boxShadow: expanded
-                            ? [AppShadows.colored(_confColor(conf))]
+                            ? [AppShadows.colored(rowColor)]
                             : const [AppShadows.hard3]),
                         child: Column(children: [
                           // Colour top strip
-                          Container(height: 3, color: _confColor(conf)),
+                          Container(height: 3, color: rowColor),
                           Padding(
                             padding: const EdgeInsets.all(14),
                             child: Row(children: [
                               Container(width: 36, height: 36,
                                 decoration: BoxDecoration(
-                                  color: _confColor(conf),
+                                  color: rowColor,
                                   border: AppBorders.ink2),
                                 child: Center(child: Text('${i + 1}',
                                   style: AppText.label.copyWith(
@@ -604,9 +612,11 @@ class _CompletionScreenState extends State<CompletionScreen>
                                     fontSize: 11, height: 1.3)),
                                 const SizedBox(height: 4),
                                 Row(children: [
-                                  Text('${conf.round()}% confidence',
+                                  Text(isScored
+                                      ? '${conf.round()}% score'
+                                      : "Couldn't score this answer",
                                     style: AppText.caption.copyWith(
-                                      color: _confColor(conf))),
+                                      color: rowColor)),
                                   const SizedBox(width: 8),
                                   Text('. ${r['wordCount'] ?? 0} words',
                                     style: AppText.caption),
@@ -651,8 +661,8 @@ class _CompletionScreenState extends State<CompletionScreen>
                                     _qAITile(_qAIData(i + 1)!),
                                   // Stats row
                                   Row(children: [
-                                    _miniStat('EMOTION',
-                                      r['emotion'] as String? ?? '-',
+                                    _miniStat('SCORE',
+                                      isScored ? '${conf.round()}%' : '-',
                                       AppColors.blue),
                                     const SizedBox(width: 8),
                                     _miniStat('FILLERS',
@@ -753,7 +763,7 @@ class _CompletionScreenState extends State<CompletionScreen>
                         icon: Icons.psychology_rounded,
                         title: 'CONFIDENCE SCORE',
                         body: _avgConfidence >= 70
-                          ? 'Strong overall confidence of ${_avgConfidence.round()}%. Keep up structured, clear answers.'
+                          ? 'Strong overall score of ${_avgConfidence.round()}%. Keep up structured, clear answers.'
                           : 'Confidence at ${_avgConfidence.round()}%. Try the STAR method: Situation - Task - Action - Result.',
                       ),
                     ]))),

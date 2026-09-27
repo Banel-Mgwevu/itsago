@@ -1,7 +1,7 @@
 ﻿import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
-import 'auth_screen.dart';
+import 'profile_setup_screen.dart';
 
 class PurposeSelectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -33,7 +33,7 @@ class _PurposeSelectionScreenState extends State<PurposeSelectionScreen>
     if (_selected == null) return;
     Navigator.of(context).push(PageRouteBuilder(
       pageBuilder: (_, __, ___) =>
-          AuthScreen(cameras: widget.cameras, selectedPurpose: _selected!),
+          ProfileSetupScreen(cameras: widget.cameras, selectedPurpose: _selected!),
       transitionsBuilder: (_, a, __, child) => SlideTransition(
         position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
             .animate(CurvedAnimation(parent: a, curve: Curves.easeOut)),

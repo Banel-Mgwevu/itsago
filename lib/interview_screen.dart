@@ -41,6 +41,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
   List<String> _fillers = [];
   double _cardOpacity = 1.0;
   bool   _isSpeaking = false;
+  bool   _finishingUp = false;
   bool   _faceDetected = false, _showFaceWarning = false;
   String _coachingTip    = '';
   String _midCoachingMsg = '';
@@ -101,6 +102,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
       _fillers        = (s['fillerWords'] as List?)?.cast<String>() ?? _fillers;
       _cardOpacity    = (s['analysisCardsOpacity'] as num?)?.toDouble() ?? _cardOpacity;
       _isSpeaking     = s['isSpeaking']                ?? _isSpeaking;
+      _finishingUp    = s['finishingUp']               ?? _finishingUp;
       _faceDetected   = s['faceDetected']              ?? _faceDetected;
       _showFaceWarning  = s['showingFaceWarning']      ?? _showFaceWarning;
       _coachingTip    = s['coachingTip']  as String?  ?? _coachingTip;
@@ -354,7 +356,7 @@ class _InterviewScreenState extends State<InterviewScreen> {
                         decoration: const BoxDecoration(
                           color: Colors.white, shape: BoxShape.circle)),
                       const SizedBox(width: 6),
-                      Text(_fmt(_recDuration),
+                      Text('${_fmt(_recDuration)} / ${_fmt(InterviewManager.maxAnswerSeconds)}',
                         style: AppText.label.copyWith(
                           color: Colors.white, fontSize: 10)),
                     ])),
@@ -371,28 +373,24 @@ class _InterviewScreenState extends State<InterviewScreen> {
                   textAlign: TextAlign.center)),
             ]))),
 
-        // Analysis cards — right side
-        Positioned(
-          right: 12,
-          top: MediaQuery.of(context).padding.top + 180,
-          child: AnimatedOpacity(
-            opacity: _cardOpacity,
-            duration: const Duration(milliseconds: 400),
-            child: Column(children: [
-              _analysisCard('HD', 'CAMERA',
-                AppColors.blue, Icons.camera_front_rounded),
-              const SizedBox(height: 10),
-              _analysisCard('${_confidence.round()}%', 'CONFIDENCE',
-                _confidence > 70 ? AppColors.blue : AppColors.red,
-                Icons.psychology_rounded),
-              const SizedBox(height: 10),
-              _analysisCard(_emotion.toUpperCase(), 'EMOTION',
-                _emotion == 'Confident' || _emotion == 'Very Confident'
-                  ? AppColors.blue
-                  : _emotion.contains('Nervous') ? AppColors.red
-                  : AppColors.amber,
-                Icons.sentiment_satisfied_rounded),
-            ]))),
+        // Speaking indicator - honest, mic-level only (no live scoring)
+        if (_isRecording)
+          Positioned(
+            right: 12,
+            top: MediaQuery.of(context).padding.top + 180,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: _isSpeaking ? AppColors.blue : Colors.black.withOpacity(0.6),
+                border: Border.all(color: Colors.white, width: 1.5)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_isSpeaking ? Icons.graphic_eq_rounded : Icons.mic_none_rounded,
+                  color: Colors.white, size: 16),
+                const SizedBox(width: 6),
+                Text(_isSpeaking ? 'SPEAKING' : 'LISTENING',
+                  style: AppText.label.copyWith(color: Colors.white, fontSize: 9)),
+              ]))),
 
         if (_showSpeakPrompt && _isRecording)
           Positioned(
@@ -440,7 +438,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
             child: _countdownWidget(_preCountdown, AppColors.blue, 'READY')),
 
         // Final countdown
-        if (_showFinalCountdown && _isRecording && _recDuration >= 27)
+        if (_showFinalCountdown && _isRecording &&
+            _recDuration >= InterviewManager.maxAnswerSeconds - 3)
           Positioned(left: 16, top: MediaQuery.of(context).size.height * 0.35,
             child: _countdownWidget(_finalCountdown, AppColors.red, 'TIME')),
 
@@ -489,6 +488,21 @@ class _InterviewScreenState extends State<InterviewScreen> {
                     ])),
               ],
             ]))),
+
+        // Waiting for the last answers to be transcribed and scored
+        if (_finishingUp)
+          Positioned.fill(child: Container(
+            color: AppColors.ink,
+            child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const SizedBox(width: 36, height: 36,
+                child: CircularProgressIndicator(color: AppColors.amber, strokeWidth: 3)),
+              const SizedBox(height: 20),
+              Text('SCORING YOUR ANSWERS',
+                style: AppText.title.copyWith(color: Colors.white, letterSpacing: 2)),
+              const SizedBox(height: 8),
+              Text('This can take up to a minute',
+                style: AppText.caption.copyWith(color: AppColors.amber)),
+            ])))),
       ]));
   }
 

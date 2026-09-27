@@ -3,9 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:interviewai/cloud_function_service.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'app_theme.dart';
@@ -13,7 +11,8 @@ import 'app_config.dart';
 import 'calendar_service.dart';
 import 'progress_service.dart';
 import 'purchase_service.dart';
-import 'drill_session_screen.dart';
+import 'access_service.dart';
+import 'paywall.dart';
 
 class AiCoachScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -32,178 +31,107 @@ class _AiCoachScreenState extends State<AiCoachScreen>
   // State
   bool _thinking    = false;
   bool _loadingCtx  = true;
-  bool _voiceMode   = false;
-  bool _listening   = false;
-  bool _ttsPlaying  = false;
-  bool _voiceReady  = false;
-
-  // Voice
-  final FlutterTts        _tts    = FlutterTts();
-  final stt.SpeechToText  _speech = stt.SpeechToText();
+  bool _unlimited   = false;  // premium/grandfathered - skip the free count
+  bool _gating      = false;
 
   // Context
   List<CalendarEvent>     _upcomingInterviews = [];
   Map<String, dynamic>?   _progressStats;
   String                  _userName = '';
 
-  // Pulse animation for mic
-  late AnimationController _micPulse = AnimationController(
-    vsync: this, duration: const Duration(milliseconds: 800))
-    ..repeat(reverse: true);
-
   static const _kModel = 'claude-haiku-4-5-20251001';
-  static const _kFreeLimit = 3;
-  bool _isPremium = false;
-  int  _messagesLeft = _kFreeLimit;
 
   @override
   void initState() {
     super.initState();
-    _initVoice();
-    _loadContext();
-    _initPremiumAndLimit();
+    _init();
   }
 
-  Future<void> _initPremiumAndLimit() async {
-    final svc = PurchaseService();
-    svc.onPurchaseSuccess = () { if (mounted) setState(() => _isPremium = true); };
-    await svc.init();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final prefs = await SharedPreferences.getInstance();
-    final storedDate = prefs.getString('ai_coach_msg_date') ?? '';
-    int used = prefs.getInt('ai_coach_msg_count') ?? 0;
-    if (storedDate != today) {
-      used = 0;
-      await prefs.setString('ai_coach_msg_date', today);
-      await prefs.setInt('ai_coach_msg_count', 0);
+  Future<void> _init() async {
+    await _restoreChat();   // bring back the previous conversation first
+    await _loadContext();   // greets only if there is no saved chat
+  }
+
+  // - Chat memory (saved on this phone, per account) -
+
+  static const int _kMaxSaved = 100;
+
+  String get _chatKey =>
+      'ai_coach_chat_${FirebaseAuth.instance.currentUser?.uid ?? 'guest'}';
+
+  Future<void> _restoreChat() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_chatKey);
+      if (raw == null || raw.isEmpty) return;
+      final list = (jsonDecode(raw) as List)
+          .map((e) => _Msg(role: e['role'] as String, text: e['text'] as String))
+          .toList();
+      if (list.isEmpty || !mounted) return;
+      setState(() => _messages..clear()..addAll(list));
+      _scrollDown();
+    } catch (_) {
+      // Corrupt or old data - just start fresh.
     }
-    if (mounted) setState(() {
-      _isPremium = svc.isPremium;
-      _messagesLeft = (_kFreeLimit - used).clamp(0, _kFreeLimit);
-    });
   }
 
-  Future<bool> _consumeFreeMessage() async {
-    if (_isPremium) return true;
-    if (_messagesLeft <= 0) return false;
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final used = (prefs.getInt('ai_coach_msg_count') ?? 0) + 1;
-    await prefs.setInt('ai_coach_msg_count', used);
-    await prefs.setString('ai_coach_msg_date', today);
-    if (mounted) setState(() => _messagesLeft = (_kFreeLimit - used).clamp(0, _kFreeLimit));
-    return true;
+  Future<void> _saveChat() async {
+    try {
+      final keep = _messages.where((m) => !m.isError).toList();
+      final trimmed = keep.length > _kMaxSaved
+          ? keep.sublist(keep.length - _kMaxSaved)
+          : keep;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_chatKey, jsonEncode(
+          trimmed.map((m) => {'role': m.role, 'text': m.text}).toList()));
+    } catch (_) {}
   }
 
-  void _showCoachPaywall() {
-    showDialog(context: context, builder: (_) => Dialog(
-      backgroundColor: Colors.transparent,
-      child: Container(
-        decoration: BoxDecoration(color: Colors.white,
-          border: Border.all(color: AppColors.ink, width: 2),
-          boxShadow: const [AppShadows.hard4]),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: double.infinity, color: AppColors.ink, padding: const EdgeInsets.all(16),
-            child: Column(children: [
-              const Icon(Icons.psychology_rounded, color: AppColors.amber, size: 32),
-              const SizedBox(height: 8),
-              Text('THAT WAS YOUR 3 FOR TODAY', style: AppText.title.copyWith(color: Colors.white, fontSize: 15, letterSpacing: 1)),
-              const SizedBox(height: 4),
-              const Text('Unlock unlimited coaching, plus every CV template', style: TextStyle(fontSize: 11, color: Colors.white70)),
-            ])),
-          Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-            const Text('One unlock covers unlimited AI Coach chats and every premium CV template. One payment, everything open.', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Color(0xFF1C1C3A), fontWeight: FontWeight.w600, height: 1.5)),
+  Future<void> _confirmNewChat() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dlg) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          decoration: AppDecorations.dialog,
+          padding: const EdgeInsets.all(20),
+          child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('START A NEW CHAT?', style: AppText.title),
+            const SizedBox(height: 8),
+            Text('This clears your conversation with the coach on this phone.',
+              style: AppText.body.copyWith(color: AppColors.dim)),
             const SizedBox(height: 18),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text('R59', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.grey, decoration: TextDecoration.lineThrough)),
-              const SizedBox(width: 12),
-              Text('R29', style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: Color(0xFF1C1C3A))),
+            Row(children: [
+              Expanded(child: GestureDetector(
+                onTap: () => Navigator.pop(dlg, false),
+                child: Container(height: 44,
+                  decoration: const BoxDecoration(
+                    color: AppColors.white, border: AppBorders.ink2),
+                  child: Center(child: Text('CANCEL', style: AppText.label))))),
+              const SizedBox(width: 10),
+              Expanded(child: GestureDetector(
+                onTap: () => Navigator.pop(dlg, true),
+                child: Container(height: 44,
+                  decoration: const BoxDecoration(
+                    color: AppColors.red, border: AppBorders.ink2,
+                    boxShadow: [AppShadows.hard3]),
+                  child: Center(child: Text('NEW CHAT',
+                    style: AppText.label.copyWith(color: Colors.white)))))),
             ]),
-            const SizedBox(height: 4),
-            const Text('Less than a taxi fare to work', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () async {
-                final svc = PurchaseService();
-                await svc.buyPremiumTemplates();
-                if (mounted) Navigator.pop(context);
-              },
-              child: Container(width: double.infinity, height: 52,
-                decoration: BoxDecoration(color: const Color(0xFF1C1C3A), border: Border.all(color: Colors.black, width: 2),
-                  boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
-                child: const Center(child: Text('UNLOCK EVERYTHING', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5))))),
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () async {
-                Navigator.pop(context);
-                await PurchaseService().restorePurchases();
-                if (mounted) setState(() => _isPremium = PurchaseService().isPremium);
-              },
-              child: const Text('Restore purchase', style: TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.underline))),
-          ])),
-        ]))));
+          ]))));
+    if (ok != true || !mounted) return;
+    setState(() => _messages.clear());
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_chatKey);
+    _addGreeting();
   }
 
   @override
   void dispose() {
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
-    _micPulse.dispose();
-    _tts.stop();
-    _speech.stop();
     super.dispose();
-  }
-
-  // - Voice init -
-
-  Future<void> _initVoice() async {
-    await _tts.setLanguage('en-ZA');
-    await _tts.setSpeechRate(0.48);
-    await _tts.setVolume(1.0);
-    _tts.setCompletionHandler(() {
-      if (mounted) setState(() => _ttsPlaying = false);
-    });
-    _voiceReady = await _speech.initialize(
-      onStatus: (s) {
-        if (s == 'done' || s == 'notListening') {
-          if (mounted) setState(() => _listening = false);
-        }
-      },
-      onError: (_) {
-        if (mounted) setState(() => _listening = false);
-      });
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _speak(String text) async {
-    if (!_voiceMode) return;
-    setState(() => _ttsPlaying = true);
-    await _tts.speak(text);
-  }
-
-  Future<void> _toggleListen() async {
-    if (!_voiceReady) return;
-    if (_listening) {
-      await _speech.stop();
-      setState(() => _listening = false);
-      return;
-    }
-    setState(() => _listening = true);
-    await _speech.listen(
-      onResult: (r) {
-        if (r.finalResult && r.recognizedWords.isNotEmpty) {
-          setState(() => _listening = false);
-          _sendText(r.recognizedWords);
-        }
-      },
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 3),
-      localeId: 'en_ZA');
-  }
-
-  void _stopTTS() {
-    _tts.stop();
-    setState(() => _ttsPlaying = false);
   }
 
   // - Load context -
@@ -218,7 +146,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     _progressStats      = results[1] as Map<String, dynamic>?;
     if (mounted) {
       setState(() => _loadingCtx = false);
-      _addGreeting();
+      if (_messages.isEmpty) _addGreeting();
     }
   }
 
@@ -245,17 +173,17 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       greeting =
         'Hi$name! I can see you have an interview $when - ${next.title}.\n\n'
         'I have loaded your calendar and performance data. '
-        'Tap PREP NOW on the banner above, or start a Drill Session '
-        'to practise targeted questions. What would you like to do?';
+        'Tap PREP NOW on the banner above, or ask me anything '
+        'about the interview. What would you like to do?';
     } else if (total > 0) {
       greeting =
         'Hi$name! I have loaded your performance data - '
         '$total session${total == 1 ? "" : "s"}, '
         'average confidence $avgConf%.\n\n'
         '${avgConf < 60
-          ? "There is room to build that confidence. Try a Drill Session."
+          ? "There is room to build that confidence. Let\'s work on it together."
           : avgConf < 75
-          ? "Good progress. Let\'s push further - try a targeted drill."
+          ? "Good progress. Let\'s push further."
           : "Strong numbers. Let\'s keep the momentum going."}\n\n'
         'What would you like to work on?';
     } else {
@@ -263,11 +191,11 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         'Hi$name! I am your ITSAGO AI Coach.\n\n'
         'I am here to help you prepare for interviews, practise answers, '
         'and build your confidence.\n\n'
-        'You can chat with me, run a structured Drill Session, '
-        'or use voice mode to practise speaking out loud. '
-        'What would you like to do?';
+        'Ask me anything, or tap one of the topics above to get started. '
+        'What would you like to work on?';
     }
     setState(() => _messages.add(_Msg(role: 'assistant', text: greeting)));
+    _saveChat();
   }
 
   String _systemPrompt() {
@@ -291,7 +219,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       'or "I\'ll stick to what I\'m best at - your career. What\'s on your mind about interviews or job hunting?"\n'
       'This rule applies even if the person insists, rephrases, or claims a special reason - stay warm, but stay on topic every time.\n\n'
       'Be concise, practical and direct. Use South African context where relevant.\n'
-      'LENGTH RULE: Keep replies short - 2 to 4 sentences, or a short bulleted list of at most 4 items. Get straight to the practical answer, no long preamble or over-explaining. Only go longer than that if the person explicitly asks for more detail, a full example, or a worked-through answer.');
+      'LENGTH RULE (STRICT): Keep every reply SHORT - under 70 words. Use 2 to 3 sentences, or at most 3 short bullet points. No preamble, no recap, no sign-off. If a topic needs more, give the most useful part and ask if they want more. Even when asked for a list or examples, keep it within 70 words.');
     if (_userName.isNotEmpty) sb.writeln('\nUser: $_userName');
     final stats = _progressStats;
     if (stats != null && (stats['total'] as int) > 0) {
@@ -311,10 +239,6 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         sb.writeln('${e.title} - in $d day${d == 1 ? "" : "s"}');
       }
     }
-    if (_voiceMode) {
-      sb.writeln('\nUSER IS IN VOICE MODE - keep replies under 3 sentences. '
-        'Be conversational, no bullet lists, no markdown.');
-    }
     return sb.toString();
   }
 
@@ -327,21 +251,43 @@ class _AiCoachScreenState extends State<AiCoachScreen>
     _sendText(text);
   }
 
+  /// 2 free messages, then the paywall. Returns true if this message may go.
+  Future<bool> _checkCoachAccess(String text) async {
+    if (_unlimited) return true;
+    if (await AccessService.hasFullAccess()) {
+      _unlimited = true;
+      return true;
+    }
+    if ((await AccessService.aiCoachMessagesUsed()) < AccessService.freeAiCoachMessages) return true;
+    if (!mounted) return false;
+    final unlocked = await Paywall.show(context, PaywallFeature.aiCoach);
+    if (unlocked) {
+      _unlimited = true;
+      return true;
+    }
+    // Didn't pay - give them their typed message back so nothing is lost.
+    if (mounted && _inputCtrl.text.isEmpty) _inputCtrl.text = text;
+    return false;
+  }
+
   Future<void> _sendText(String text) async {
-    if (_thinking) return;
-    if (_ttsPlaying) _stopTTS();
-    final allowed = await _consumeFreeMessage();
-    if (!allowed) { _showCoachPaywall(); return; }
+    if (_thinking || _gating) return;
+    _gating = true;
+    final allowed = await _checkCoachAccess(text);
+    _gating = false;
+    if (!allowed || !mounted) return;
     setState(() {
       _messages.add(_Msg(role: 'user', text: text));
       _thinking = true;
     });
+    _saveChat();
     _scrollDown();
     try {
       // Claude API requires history to start with user role.
       // The local greeting is assistant-generated and must be excluded.
       // Also trim to last 20 messages to avoid token limits.
       final allMsgs = _messages
+        .where((m) => !m.isError)
         .map((m) => {'role': m.role, 'content': m.text})
         .toList();
       final firstUser = allMsgs.indexWhere((m) => m['role'] == 'user');
@@ -352,28 +298,38 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       final res = await CloudFunctionService.callClaude(
         
           model: 'claude-haiku-4-5-20251001',
-          maxTokens: _voiceMode ? 200 : 320,
+          maxTokens: 220,
           system: _systemPrompt(),
           messages: history,
         );
       
         final raw = CloudFunctionService.extractText(res);
-        final reply = raw.replaceAll(RegExp(r'\*\*'), '').replaceAll(RegExp(r'\*'), '').replaceAll(RegExp(r'#{1,6} '), '').trim();
+        final reply = _tidyReply(raw.replaceAll(RegExp(r'\*\*'), '').replaceAll(RegExp(r'\*'), '').replaceAll(RegExp(r'#{1,6} '), '').trim());
         if (mounted) {
           setState(() {
             _messages.add(_Msg(role: 'assistant', text: reply));
             _thinking = false;
           });
-          if (_voiceMode) await _speak(reply);
+          _saveChat();
+          // Only successful replies use up a free message.
+          if (!_unlimited) AccessService.recordAiCoachMessage();
         }
     } catch (_) {
       if (mounted) setState(() {
-        _messages.add(_Msg(role: 'assistant',
+        _messages.add(_Msg(role: 'assistant', isError: true,
           text: 'Sorry - connection issue. Please try again.'));
         _thinking = false;
       });
     }
     _scrollDown();
+  }
+
+  /// If a reply got cut off by the length limit, end it at the last full
+  /// sentence so it never stops mid-word.
+  String _tidyReply(String text) {
+    if (text.isEmpty || RegExp(r'[.!?)\]"]$').hasMatch(text)) return text;
+    final cut = text.lastIndexOf(RegExp(r'[.!?](\s|$)'));
+    return cut > 40 ? text.substring(0, cut + 1) : text;
   }
 
   void _scrollDown() => Future.delayed(const Duration(milliseconds: 120), () {
@@ -393,7 +349,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
         'label':  days == 0 ? 'Prep Today' : days == 1 ? 'Prep Tomorrow' : 'Prep Interview',
         'prompt': 'I have an interview for ${next.title} '
           '${days == 0 ? "today" : days == 1 ? "tomorrow" : "in $days days"}. '
-          'Give me the top 5 questions and a prep plan.',
+          'Give me the top 3 questions I should prepare for.',
         'icon': Icons.event_rounded, 'color': AppColors.red,
       });
     }
@@ -402,20 +358,20 @@ class _AiCoachScreenState extends State<AiCoachScreen>
       list.add({
         'label':  'Confidence',
         'prompt': 'My average confidence is ${avg.round()}%. '
-          'Give me a 5-minute confidence building drill.',
+          'Give me a 5-minute confidence boost I can do before my interview.',
         'icon': Icons.psychology_rounded, 'color': AppColors.amber,
       });
     }
     list.addAll([
-      {'label': 'STAR Method',  'prompt': 'Teach me STAR with 2 worked examples.',
+      {'label': 'STAR Method',  'prompt': 'Explain the STAR method quickly with one short example.',
        'icon': Icons.star_rounded, 'color': AppColors.amber},
-      {'label': 'Mock Q&A',     'prompt': 'Ask me 3 interview questions and give feedback on my answers.',
+      {'label': 'Mock Q&A',     'prompt': 'Ask me one interview question, then give me short feedback on my answer.',
        'icon': Icons.mic_rounded, 'color': AppColors.red},
       {'label': 'Salary Nego',  'prompt': 'How do I negotiate salary in South Africa without losing the offer?',
        'icon': Icons.attach_money_rounded, 'color': AppColors.blue},
       {'label': 'Weakness Q',   'prompt': 'How do I answer "What is your greatest weakness?" impressively?',
        'icon': Icons.shield_rounded, 'color': AppColors.ink},
-      {'label': 'Body Language','prompt': 'Give me 5 video interview body language tips.',
+      {'label': 'Body Language','prompt': 'Give me 3 quick body language tips for a video interview.',
        'icon': Icons.accessibility_new_rounded, 'color': AppColors.blue},
     ]);
     return list.take(6).toList();
@@ -433,7 +389,18 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           title:       'AI COACH',
           context:     context,
           leading:     AppWidgets.backButton(context),
-          accentColor: AppColors.amber),
+          accentColor: AppColors.amber,
+          trailing:    Semantics(
+            button: true,
+            label: 'New chat',
+            child: GestureDetector(
+              onTap: _thinking ? null : _confirmNewChat,
+              child: Container(
+                width: 34, height: 34,
+                decoration: const BoxDecoration(
+                  color: AppColors.white, border: AppBorders.ink2),
+                child: const Icon(Icons.add_comment_rounded,
+                  color: AppColors.ink, size: 17))))),
 
         // Interview banner
         if (_upcomingInterviews.isNotEmpty)
@@ -452,9 +419,6 @@ class _AiCoachScreenState extends State<AiCoachScreen>
               Text('Loading your performance data...',
                 style: AppText.caption.copyWith(color: AppColors.blue)),
             ])),
-
-        // Toolbar: voice mode + drill mode
-        _toolbar(),
 
         // Quick prompts
         Container(
@@ -502,122 +466,10 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           _contextStrip(),
 
         // Input area
-        _voiceMode ? _voiceInput() : _textInput(),
+        _textInput(),
 
       ])));
   }
-
-  // - Toolbar -
-
-  Widget _toolbar() => Container(
-    color: AppColors.white,
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    child: Row(children: [
-
-      // Voice mode toggle
-      GestureDetector(
-        onTap: () => setState(() { _voiceMode = !_voiceMode; if (!_voiceMode) { _speech.stop(); _tts.stop(); }}),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: _voiceMode ? AppColors.red : Colors.transparent,
-            border: Border.all(
-              color: _voiceMode ? AppColors.red : AppColors.mist,
-              width: 1.5)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.mic_rounded,
-              size: 13,
-              color: _voiceMode ? Colors.white : AppColors.dim),
-            const SizedBox(width: 6),
-            Text('VOICE${_voiceMode ? " ON" : ""}',
-              style: AppText.label.copyWith(
-                fontSize: 8,
-                color: _voiceMode ? Colors.white : AppColors.dim)),
-          ]))),
-
-      const SizedBox(width: 8),
-
-      // TTS stop button (when playing)
-      if (_ttsPlaying)
-        GestureDetector(
-          onTap: _stopTTS,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppColors.amber,
-              border: Border.all(color: AppColors.ink, width: 1.5)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.stop_rounded, size: 13, color: AppColors.ink),
-              const SizedBox(width: 6),
-              Text('STOP', style: AppText.label.copyWith(
-                fontSize: 8, color: AppColors.ink)),
-            ]))),
-
-      const Spacer(),
-
-      // Drill mode button
-      GestureDetector(
-        onTap: () => Navigator.push(context, MaterialPageRoute(
-          builder: (_) => DrillSessionScreen(
-            progressStats: _progressStats))),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: const BoxDecoration(
-            color: AppColors.ink, border: AppBorders.ink2,
-            boxShadow: [AppShadows.hard3]),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.fitness_center_rounded,
-              size: 13, color: AppColors.amber),
-            const SizedBox(width: 6),
-            Text('DRILL MODE',
-              style: AppText.label.copyWith(
-                fontSize: 8, color: Colors.white)),
-          ]))),
-    ]));
-
-  // - Voice input -
-
-  Widget _voiceInput() => Container(
-    color: AppColors.white,
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-    child: Column(children: [
-      if (_listening)
-        Padding(padding: const EdgeInsets.only(bottom: 10),
-          child: Text('Listening...',
-            style: AppText.label.copyWith(
-              color: AppColors.red, fontSize: 10))),
-      AnimatedBuilder(animation: _micPulse, builder: (_, __) =>
-        GestureDetector(
-          onTap: _listening ? _toggleListen : _toggleListen,
-          child: Container(
-            width: 72 + (_listening ? _micPulse.value * 8 : 0),
-            height: 72 + (_listening ? _micPulse.value * 8 : 0),
-            decoration: BoxDecoration(
-              color: _listening ? AppColors.red : AppColors.ink,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: _listening
-                  ? AppColors.red.withOpacity(0.3 + _micPulse.value * 0.4)
-                  : AppColors.ink,
-                width: _listening ? 3 + _micPulse.value * 4 : 2),
-              boxShadow: _listening
-                ? [BoxShadow(
-                    color: AppColors.red.withOpacity(0.3 + _micPulse.value * 0.2),
-                    blurRadius: 12 + _micPulse.value * 8,
-                    spreadRadius: 2)]
-                : const [AppShadows.hard4]),
-            child: Icon(
-              _listening ? Icons.stop_rounded : Icons.mic_rounded,
-              color: Colors.white,
-              size: 30)))),
-      const SizedBox(height: 10),
-      Text(
-        _thinking ? 'Coach is thinking...'
-        : _ttsPlaying ? 'Coach is speaking...'
-        : _listening ? 'Tap to stop'
-        : 'Tap to speak',
-        style: AppText.caption.copyWith(color: AppColors.dim)),
-    ]));
 
   // - Text input -
 
@@ -728,8 +580,6 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           const SizedBox(width: 10),
         ],
         Flexible(child: GestureDetector(
-          onTap: (!isUser && _voiceMode)
-            ? () => _speak(msg.text) : null,
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -749,17 +599,6 @@ class _AiCoachScreenState extends State<AiCoachScreen>
                 style: AppText.body.copyWith(
                   color: isUser ? Colors.white : AppColors.ink,
                   height: 1.5)),
-              if (!isUser && _voiceMode) ...[
-                const SizedBox(height: 6),
-                Row(children: [
-                  const Icon(Icons.volume_up_rounded,
-                    size: 11, color: AppColors.dim),
-                  const SizedBox(width: 4),
-                  Text('Tap to replay',
-                    style: AppText.caption.copyWith(
-                      fontSize: 9, color: AppColors.dim)),
-                ]),
-              ],
             ])),
         )),
         if (isUser) ...[
@@ -808,6 +647,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
 
 class _Msg {
   final String role, text;
-  const _Msg({required this.role, required this.text});
+  final bool isError; // connection errors are shown but never saved or sent
+  const _Msg({required this.role, required this.text, this.isError = false});
 }
 

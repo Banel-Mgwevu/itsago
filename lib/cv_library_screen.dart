@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart' show launchUrl, LaunchMode;
 import 'app_theme.dart';
 import 'cv_storage_service.dart';
 import 'ats_scoring_service.dart';
+import 'paywall.dart';
 
 class CVLibraryScreen extends StatefulWidget {
   const CVLibraryScreen({super.key});
@@ -47,6 +48,8 @@ class _CVLibraryScreenState extends State<CVLibraryScreen> with WidgetsBindingOb
   }
 
   Future<void> _download(String cvId, CVFileType type) async {
+    if (!await Paywall.ensureAccess(context, PaywallFeature.cvDownload)) return;
+    if (!mounted) return;
     setState(() => _downloading = '$cvId-${type.name}');
     final url = await CVStorageService.getDownloadUrl(cvId, type);
     if (mounted) setState(() => _downloading = null);

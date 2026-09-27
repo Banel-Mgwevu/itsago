@@ -3,7 +3,7 @@ import 'package:camera/camera.dart';
 import 'app_theme.dart';
 import 'loading_screen.dart';
 import 'app_config.dart';
-import 'purchase_service.dart';
+import 'paywall.dart';
 
 class JobSpecificSetupScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -17,11 +17,11 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
 
   final _companyCtrl = TextEditingController();
   final _jobTitleCtrl = TextEditingController();
+  final _jobDescCtrl = TextEditingController();
   bool _companyError = false;
   bool _jobTitleError = false;
   String _roleLevel = 'Mid-Level';
   static const _roleLevels = ['Junior', 'Mid-Level', 'Senior'];
-  bool _isUnlocked = false;
 
   late final AnimationController _entryCtrl = AnimationController(
     vsync: this, duration: const Duration(milliseconds: 700))..forward();
@@ -35,34 +35,18 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
               curve: Interval(a, b, curve: Curves.easeOut)));
 
   @override
-  void initState() {
-    super.initState();
-    _initPurchase();
-  }
-
-  Future<void> _initPurchase() async {
-    final svc = PurchaseService();
-    svc.onJobSpecificPurchaseSuccess = (_) {
-      if (mounted) {
-        setState(() => _isUnlocked = true);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Unlocked! Tap Generate to continue.'),
-          backgroundColor: AppColors.ink));
-      }
-    };
-    await svc.init();
-    if (mounted) setState(() => _isUnlocked = svc.isJobSpecificUnlocked);
-  }
-
-  @override
   void dispose() {
     _companyCtrl.dispose();
     _jobTitleCtrl.dispose();
+    _jobDescCtrl.dispose();
     _entryCtrl.dispose();
     super.dispose();
   }
 
-  void _start() {
+  bool _starting = false;
+
+  Future<void> _start() async {
+    if (_starting) return;
     final companyEmpty = _companyCtrl.text.trim().isEmpty;
     final jobTitleEmpty = _jobTitleCtrl.text.trim().isEmpty;
     if (companyEmpty || jobTitleEmpty) {
@@ -71,21 +55,35 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
     }
     setState(() { _companyError = false; _jobTitleError = false; });
 
-    // Job-specific interview is free - no paywall.
+    _starting = true;
+    final allowed = await Paywall.ensureAccess(context, PaywallFeature.jobInterview);
+    _starting = false;
+    if (!allowed || !mounted) return;
 
     final company  = _companyCtrl.text.trim();
     final jobTitle = _jobTitleCtrl.text.trim();
+    final realJobDesc = _jobDescCtrl.text.trim();
 
-    final syntheticJobDescription =
-      'The candidate is applying for a $_roleLevel level role of "$jobTitle" at $company. '
-      'Generate interview questions appropriate for someone at $_roleLevel level, '
-      'matching the typical responsibilities, skills and expectations of this '
-      'specific role and seniority.';
+    // A real pasted job posting gives the AI actual responsibilities,
+    // skills and tools to write questions from - far more specific than
+    // a title alone. If the person skipped it, fall back to a synthetic
+    // description that explicitly forces the AI to reason about what
+    // this exact role/seniority/company combination actually involves,
+    // rather than defaulting to generic soft-skill questions.
+    final jobDescription = realJobDesc.isNotEmpty
+      ? 'Role: "$jobTitle" ($_roleLevel level) at $company.\n\n'
+        'Job description:\n$realJobDesc'
+      : 'The candidate is applying for a $_roleLevel level "$jobTitle" role at $company. '
+        'No job posting was provided, so first think concretely about what a '
+        '$_roleLevel $jobTitle actually does day-to-day - the specific skills, '
+        'tools, tasks and responsibilities typical of that exact title and '
+        'seniority (not a generic office job) - then base the interview '
+        'questions on that real substance, not on the job title alone.';
 
     Navigator.of(context).push(PageRouteBuilder(
       pageBuilder: (_, __, ___) => LoadingScreen(
         cameras:            widget.cameras,
-        jobDescription:     syntheticJobDescription,
+        jobDescription:     jobDescription,
         interviewStyle:     'friendly',
         questionCategories: const ['behavioural','situational','values','strength'],
         company:            company,
@@ -137,73 +135,6 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
     ]);
   }
 
-  void _showPaywallDialog() {
-    showDialog(context: context, builder: (_) => Dialog(
-      backgroundColor: Colors.transparent,
-      child: Container(
-        decoration: BoxDecoration(color: Colors.white,
-          border: Border.all(color: AppColors.ink, width: 2),
-          boxShadow: const [AppShadows.hard4]),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: double.infinity, color: AppColors.ink, padding: const EdgeInsets.all(16),
-            child: Column(children: [
-              const Icon(Icons.psychology_alt_rounded, color: AppColors.red, size: 32),
-              const SizedBox(height: 8),
-              Text('JOB SPECIFIC INTERVIEW', style: AppText.title.copyWith(
-                color: Colors.white, letterSpacing: 1.5)),
-              const SizedBox(height: 4),
-              const Text('Questions built for this exact role',
-                style: TextStyle(fontSize: 11, color: Colors.white70)),
-            ])),
-          Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-            _paywallFeature(Icons.auto_awesome_rounded, 'AI-generated questions', 'Tailored to the company and role'),
-            _paywallFeature(Icons.trending_up_rounded, 'Matched to your level', 'Junior, mid-level or senior difficulty'),
-            _paywallFeature(Icons.all_inclusive_rounded, 'Yours for good', 'One-time payment, unlimited use after'),
-            const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text('R50', style: TextStyle(fontSize: 36, fontWeight: FontWeight.w900, color: AppColors.ink)),
-              const SizedBox(width: 8),
-              Text('once off', style: TextStyle(fontSize: 12, color: AppColors.dim, fontWeight: FontWeight.w600)),
-            ]),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () async {
-                final svc = PurchaseService();
-                await svc.buyJobSpecificInterview();
-                if (mounted) Navigator.pop(context);
-              },
-              child: Container(width: double.infinity, height: 52,
-                decoration: const BoxDecoration(color: AppColors.red,
-                  border: AppBorders.ink2, boxShadow: [AppShadows.hard4]),
-                child: const Center(child: Text('UNLOCK FOR R50', style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5))))),
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () async {
-                Navigator.pop(context);
-                await PurchaseService().restorePurchases();
-                if (mounted) setState(() => _isUnlocked = PurchaseService().isJobSpecificUnlocked);
-              },
-              child: const Text('Restore purchase', style: TextStyle(
-                fontSize: 11, color: Colors.grey, decoration: TextDecoration.underline))),
-          ])),
-        ]))));
-  }
-
-  Widget _paywallFeature(IconData icon, String title, String sub) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Row(children: [
-      Container(width: 32, height: 32,
-        decoration: BoxDecoration(color: AppColors.red.withOpacity(0.1),
-          border: Border.all(color: AppColors.red, width: 1)),
-        child: Icon(icon, color: AppColors.red, size: 16)),
-      const SizedBox(width: 12),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.ink)),
-        Text(sub, style: TextStyle(fontSize: 10.5, color: AppColors.dim)),
-      ])),
-    ]));
-
   Widget _levelChip(String label) {
     final on = _roleLevel == label;
     return GestureDetector(
@@ -232,7 +163,21 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
           context:     context,
           leading:     AppWidgets.backButton(context),
           accentColor: AppColors.red),
-        Expanded(child: SingleChildScrollView(
+        Expanded(child: Stack(children: [
+
+          // Decorative accents - matches the geometric language used on
+          // ProfileSetupScreen/AuthScreen so this doesn't read as a
+          // plainer, older-feeling screen than the rest of the flow.
+          Positioned(top: -40, right: -40,
+            child: Container(width: 120, height: 120,
+              decoration: BoxDecoration(shape: BoxShape.circle,
+                color: AppColors.red.withOpacity(0.08),
+                border: Border.all(color: AppColors.red.withOpacity(0.18), width: 1.5)))),
+          Positioned(bottom: 60, left: -30,
+            child: Container(width: 80, height: 60,
+              color: AppColors.blue.withOpacity(0.05))),
+
+          SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
@@ -248,10 +193,10 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
                   boxShadow: const [AppShadows.hard4]),
                 padding: const EdgeInsets.all(16),
                 child: Row(children: [
-                  Container(width: 40, height: 40,
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle),
-                    child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 20)),
+                  Container(width: 44, height: 44,
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.18),
+                      border: Border.all(color: Colors.white, width: 1.5)),
+                    child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 22)),
                   const SizedBox(width: 12),
                   Expanded(child: Text(
                     'Just the company and role, our AI builds the rest of your practice questions.',
@@ -278,6 +223,42 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
                 ctrl: _jobTitleCtrl,
                 hint: 'e.g. Junior Software Developer',
                 error: _jobTitleError))),
+            const SizedBox(height: 20),
+
+            FadeTransition(opacity: _fade(0.28, 0.68), child: SlideTransition(
+              position: _slide(0.28, 0.68),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Container(width: 4, height: 14, color: AppColors.ink),
+                  const SizedBox(width: 8),
+                  Text('JOB DESCRIPTION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900,
+                    color: AppColors.ink, letterSpacing: 1.2)),
+                  const SizedBox(width: 6),
+                  Text('(OPTIONAL, RECOMMENDED)', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700,
+                    color: AppColors.dim, letterSpacing: 0.5)),
+                ]),
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(color: Colors.white,
+                    border: Border.all(color: AppColors.ink, width: 1.5),
+                    boxShadow: const [AppShadows.hard3]),
+                  child: TextField(
+                    controller: _jobDescCtrl,
+                    minLines: 4,
+                    maxLines: 8,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                    decoration: InputDecoration(
+                      hintText: 'Paste the job posting here for much more '
+                        'tailored questions - responsibilities, required '
+                        'skills, tools, etc.',
+                      hintStyle: TextStyle(fontSize: 12.5, color: AppColors.dim,
+                        fontWeight: FontWeight.w400, height: 1.4),
+                      contentPadding: const EdgeInsets.all(14),
+                      border: InputBorder.none))),
+                const SizedBox(height: 6),
+                Text('Without this, questions are based on the job title alone.',
+                  style: TextStyle(fontSize: 10.5, color: AppColors.dim, fontWeight: FontWeight.w500)),
+              ]))),
             const SizedBox(height: 24),
 
             FadeTransition(opacity: _fade(0.3, 0.7), child: SlideTransition(
@@ -290,9 +271,12 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
                     color: AppColors.ink, letterSpacing: 1.2)),
                 ]),
                 const SizedBox(height: 10),
-                Row(children: _roleLevels.map((l) => Expanded(
-                  child: Padding(padding: const EdgeInsets.only(right: 8),
-                    child: _levelChip(l)))).toList()),
+                Row(children: [
+                  for (int i = 0; i < _roleLevels.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    Expanded(child: _levelChip(_roleLevels[i])),
+                  ],
+                ]),
               ]))),
             const SizedBox(height: 28),
 
@@ -317,7 +301,8 @@ class _JobSpecificSetupScreenState extends State<JobSpecificSetupScreen>
               position: _slide(0.4, 0.8),
               child: Center(child: Text('Takes about 10 seconds',
                 style: TextStyle(fontSize: 11, color: AppColors.dim, fontWeight: FontWeight.w600))))),
-          ]))),
+          ])),
+        ])),
       ])));
   }
 }
