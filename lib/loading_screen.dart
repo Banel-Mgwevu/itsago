@@ -18,7 +18,14 @@ class LoadingScreen extends StatefulWidget {
   final List<String> questionCategories;
   final String company;
   final String apiKey;
+
+  /// Optional role for the normal interview (from the setup screen).
+  final String roleTitle;
+  final String roleNotes;
+
   const LoadingScreen({
+    this.roleTitle = '',
+    this.roleNotes = '',
     super.key,
     this.interviewStyle = 'friendly',
     this.questionCategories = const ['behavioural','situational','values','strength'], required this.cameras, required this.jobDescription,
@@ -94,6 +101,7 @@ class _LoadingScreenState extends State<LoadingScreen>
             'You are a warm, experienced interviewer at $company running a '
             'friendly practice interview. Write exactly 5 interview '
             'questions covering these question types: $catLabel.\n\n'
+            '${_roleContext()}'
             'Sound like a real person talking in a real conversation, not '
             'a form or a survey. Rules:\n'
             '- Plain, natural spoken English - contractions are fine '
@@ -125,8 +133,22 @@ class _LoadingScreenState extends State<LoadingScreen>
       }
     }
     return QuestionService.generate(
-        company: company, jobTitle: '', jobDescription: '',
+        company: company, jobTitle: widget.roleTitle, jobDescription: '',
         categories: categories);
+  }
+
+  /// Extra prompt text when the person added the role they're practising
+  /// for. Keeps the normal interview's question types, aimed at the job.
+  String _roleContext() {
+    final title = widget.roleTitle.trim();
+    if (title.isEmpty) return '';
+    var notes = widget.roleNotes.trim();
+    if (notes.length > 4000) notes = notes.substring(0, 4000);
+    return 'The candidate is practising for a "$title" role. Make the '
+        'questions fit what someone in this role actually does day to day, '
+        'while still covering the question types above.\n'
+        '${notes.isEmpty ? '' : 'Role details from the candidate: $notes\n'}'
+        '\n';
   }
 
   String _categoryLabel(String c) => switch (c) {

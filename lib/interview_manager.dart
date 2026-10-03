@@ -9,6 +9,7 @@ import 'camera_face_manager.dart';
 import 'app_config.dart';
 import 'cloud_function_service.dart';
 import 'answer_recorder.dart';
+import 'analytics_service.dart';
 
 class InterviewManager {
 
@@ -733,6 +734,14 @@ class InterviewManager {
   /// results screen opens. Two-minute answers take longer to transcribe,
   /// so this shows a "scoring your answers" screen instead of racing
   /// ahead with half-finished results.
+  void _logCompletion() {
+    final scored = _results.where((r) => r['scored'] != false).toList();
+    final avg = scored.isEmpty ? 0 : (scored.fold<double>(0,
+        (v, r) => v + ((r['confidence'] as num?)?.toDouble() ?? 0)) / scored.length).round();
+    Analytics.interviewCompleted(
+        questions: _results.length, scored: scored.length, avgScore: avg);
+  }
+
   Future<void> _awaitPendingReviews() async {
     if (_pendingReviews.isNotEmpty) {
       _push({'finishingUp': true});
@@ -1104,6 +1113,7 @@ class InterviewManager {
       // it so the completion screen never shows a "Processing..."
       // placeholder. Bounded so a slow network call can't hang the exit.
       await _awaitPendingReviews();
+      _logCompletion();
       onNavigateToCompletion(_results);
     }
   }

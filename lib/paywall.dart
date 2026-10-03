@@ -1,6 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'cloud_function_service.dart';
+import 'store_config.dart';
+import 'analytics_service.dart';
+import 'terms_screen.dart';
+import 'privacy_policy_detail_screen.dart';
 import 'app_theme.dart';
 import 'access_service.dart';
 import 'subscription_service.dart';
@@ -35,6 +41,7 @@ class Paywall {
   static Future<bool> show(BuildContext context, PaywallFeature feature) async {
     if (_isOpen) return false;
     _isOpen = true;
+    Analytics.paywallShown(feature.name);
     try {
       final bool? unlocked = await showGeneralDialog<bool>(
         context: context,
@@ -69,6 +76,7 @@ class Paywall {
           ]),
         ));
       }
+      Analytics.paywallClosed(feature.name, unlocked == true);
       return unlocked == true;
     } finally {
       _isOpen = false;
@@ -109,7 +117,7 @@ const Map<PaywallFeature, _FeatureCopy> _copy = {
   PaywallFeature.aiCoach: _FeatureCopy(
     'AI COACH',
     'ENJOYING THE CHAT?',
-    "Your free messages are done. Go Premium to keep going.",
+    "You've used today's 3 free messages. Go Premium for unlimited coaching, or come back tomorrow.",
     Icons.psychology_rounded,
     AppColors.blue),
   PaywallFeature.general: _FeatureCopy(
@@ -135,7 +143,9 @@ class _PaywallDialogState extends State<_PaywallDialog>
   final SubscriptionService _svc = SubscriptionService();
   StreamSubscription<SubscriptionEvent>? _events;
 
-  ProductDetails? _product;
+  ProductDetails? _product;        // monthly
+  ProductDetails? _annualProduct;  // annual (null until live in Play)
+  bool _annual = false;            // selected plan
   bool _busy = false;       // Google Play sheet is open
   bool _restoring = false;
   bool _pressed = false;
@@ -178,20 +188,41 @@ class _PaywallDialogState extends State<_PaywallDialog>
   Future<void> _loadProduct() async {
     try {
       await _svc.ensureReady();
-      if (mounted) setState(() => _product = _svc.monthlyProduct);
+      if (mounted) {
+        setState(() {
+          _product = _svc.monthlyProduct;
+          _annualProduct = _svc.annualProduct;
+        });
+      }
     } catch (_) {
-      // Price falls back to R80; the button retries when tapped.
+      // Prices fall back to R80 / R828; the button retries when tapped.
     }
   }
 
   // ── Price text (live from Google Play, R80 fallback) ──
-  String get _price {
-    final p = _product;
-    if (p == null || p.rawPrice <= 0) return 'R80';
-    final symbol = p.currencySymbol.isEmpty ? 'R' : p.currencySymbol;
-    final raw = p.rawPrice;
+  static String _money(ProductDetails? p, double fallback, {double divideBy = 1}) {
+    final has = p != null && p.rawPrice > 0;
+    final raw = has ? p.rawPrice / divideBy : fallback;
+    final symbol = (has && p.currencySymbol.isNotEmpty) ? p.currencySymbol : 'R';
     final amount = raw == raw.roundToDouble() ? raw.toInt().toString() : raw.toStringAsFixed(2);
     return '$symbol$amount';
+  }
+
+  String get _price          => _money(_product, 80);                      // R80
+  String get _annualTotal    => _money(_annualProduct, 828);               // R828
+  String get _annualPerMonth => _money(_annualProduct, 69, divideBy: 12);  // R69
+  String get _stampPrice     => _annual ? _annualPerMonth : _price;
+
+  int get _savePercent {
+    final m = (_product?.rawPrice ?? 0) > 0 ? _product!.rawPrice : 80.0;
+    final a = (_annualProduct?.rawPrice ?? 0) > 0 ? _annualProduct!.rawPrice : 828.0;
+    return ((1 - (a / 12) / m) * 100).round();
+  }
+
+  void _selectPlan(bool annual) {
+    if (_busy || annual == _annual) return;
+    setState(() => _annual = annual);
+    if (!MediaQuery.of(context).disableAnimations) _stampCtrl.forward(from: 0.15);
   }
 
   // ── Actions ──
@@ -239,20 +270,22 @@ class _PaywallDialogState extends State<_PaywallDialog>
     try {
       await _svc.ensureReady();
       if (!_svc.isAvailable) {
-        throw Exception("Eish, Google Play isn't available on this phone right now. "
-            "Check that you're signed in to the Play Store.");
+        throw Exception(StoreConfig.isIOS
+            ? "Eish, the App Store isn't available right now. Check that you're signed in with your Apple ID."
+            : "Eish, Google Play isn't available on this phone right now. "
+              "Check that you're signed in to the Play Store.");
       }
-      final product = _svc.monthlyProduct;
+      final product = _annual ? _svc.annualProduct : _svc.monthlyProduct;
       if (product == null) {
-        throw Exception("Couldn't reach Google Play. "
+        throw Exception("Couldn't reach ${StoreConfig.storeName}. "
             'Check your data or Wi-Fi and try again.');
       }
-      if (mounted) setState(() => _product = product);
-      final started = await _svc.purchaseSubscription(SubscriptionService.monthlyProductId);
+      Analytics.subscribeTapped(_annual ? 'annual' : 'monthly', widget.feature.name);
+      final started = await _svc.purchaseProduct(product);
       if (!started && mounted) {
         setState(() {
           _busy = false;
-          _status = "Google Play didn't open. Give it another go.";
+          _status = "${StoreConfig.storeName} didn't open. Give it another go.";
           _statusIsError = true;
         });
       }
@@ -316,6 +349,10 @@ class _PaywallDialogState extends State<_PaywallDialog>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _ticket(),
+                            if (_annualProduct != null) ...[
+                              const SizedBox(height: 18),
+                              _planToggle(),
+                            ],
                             const SizedBox(height: 20),
                             _cta(),
                             if (_status != null) ...[
@@ -328,12 +365,28 @@ class _PaywallDialogState extends State<_PaywallDialog>
                               child: Row(mainAxisSize: MainAxisSize.min, children: [
                                 _textLink(_restoring ? 'Checking...' : 'Restore purchase',
                                   (_busy || _restoring) ? null : _restore),
+                                // Apple doesn't allow unlocking with our own codes (3.1.1).
+                                if (!StoreConfig.isIOS) ...[
+                                  Container(width: 1, height: 14, color: AppColors.mist),
+                                  _textLink('Promo code', (_busy || _restoring) ? null : _openPromo),
+                                ],
                                 Container(width: 1, height: 14, color: AppColors.mist),
                                 _textLink('Maybe later', () => _close(false)),
                               ])),
                             const SizedBox(height: 4),
-                            Text('Cancel any time. Billed monthly through Google Play.',
+                            Text(_annual
+                                ? 'Billed once a year through ${StoreConfig.storeName}. Renews automatically. Cancel any time.'
+                                : 'Billed monthly through ${StoreConfig.storeName}. Renews automatically. Cancel any time.',
                               style: AppText.caption, textAlign: TextAlign.center),
+                            const SizedBox(height: 2),
+                            // Required by Apple (3.1.2) and good practice on Android.
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                _textLink('Terms of Use', _openTerms),
+                                Container(width: 1, height: 14, color: AppColors.mist),
+                                _textLink('Privacy Policy', _openPrivacy),
+                              ])),
                           ],
                         ),
                       ),
@@ -436,7 +489,7 @@ class _PaywallDialogState extends State<_PaywallDialog>
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   FittedBox(fit: BoxFit.scaleDown,
-                    child: Text(_price, style: AppText.display.copyWith(fontSize: 38))),
+                    child: Text(_stampPrice, style: AppText.display.copyWith(fontSize: 38))),
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -475,11 +528,100 @@ class _PaywallDialogState extends State<_PaywallDialog>
     ]);
   }
 
+  // ── Monthly / Annual picker ──
+  Widget _planToggle() {
+    return IntrinsicHeight(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(child: _planTile(
+          selected: !_annual,
+          title: 'MONTHLY',
+          price: '$_price/mo',
+          note: 'Pay month to month',
+          onTap: () => _selectPlan(false))),
+        const SizedBox(width: 10),
+        Expanded(child: _planTile(
+          selected: _annual,
+          title: 'ANNUAL',
+          price: '$_annualPerMonth/mo',
+          note: '$_annualTotal once a year',
+          badge: _savePercent > 0 ? 'SAVE $_savePercent%' : null,
+          onTap: () => _selectPlan(true))),
+      ]),
+    );
+  }
+
+  Widget _planTile({
+    required bool selected,
+    required String title,
+    required String price,
+    required String note,
+    String? badge,
+    required VoidCallback onTap,
+  }) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$title plan, $price, $note',
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.amberAt(0.16) : AppColors.white,
+            border: Border.all(
+              color: selected ? AppColors.ink : AppColors.mist,
+              width: selected ? 2 : 1.5),
+            boxShadow: selected ? const [AppShadows.hard3] : const <BoxShadow>[]),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(selected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                size: 15, color: selected ? AppColors.ink : AppColors.dim),
+              const SizedBox(width: 6),
+              Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+                child: Text(title, style: AppText.label.copyWith(fontSize: 10)))),
+            ]),
+            const SizedBox(height: 6),
+            FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+              child: Text(price, style: AppText.title.copyWith(fontSize: 16))),
+            const SizedBox(height: 2),
+            FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+              child: Text(note, style: AppText.caption.copyWith(fontSize: 10))),
+            if (badge != null) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                color: AppColors.red,
+                child: Text(badge, style: AppText.label.copyWith(
+                  color: Colors.white, fontSize: 8.5))),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _openTerms() => Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const TermsScreen(cameras: [])));
+
+  void _openPrivacy() => Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const PrivacyPolicyDetailScreen()));
+
+  // ── Promo codes ──
+  Future<void> _openPromo() async {
+    final unlocked = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _PromoCodeDialog());
+    if (unlocked == true && mounted) _close(true);
+  }
+
   Widget _cta() {
     final disabled = _busy || _restoring;
     return Semantics(
       button: true,
-      label: 'Subscribe for $_price per month',
+      label: _annual
+          ? 'Subscribe for $_annualTotal per year'
+          : 'Subscribe for $_price per month',
       child: GestureDetector(
         onTapDown: disabled ? null : (_) => setState(() => _pressed = true),
         onTapUp: disabled ? null : (_) => setState(() => _pressed = false),
@@ -502,12 +644,14 @@ class _PaywallDialogState extends State<_PaywallDialog>
                   const SizedBox(width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
                   const SizedBox(width: 12),
-                  Text('OPENING GOOGLE PLAY', style: AppText.button),
+                  Text('OPENING ${StoreConfig.storeNameCaps}', style: AppText.button),
                 ])
               : Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.lock_open_rounded, color: Colors.white, size: 19),
                   const SizedBox(width: 10),
-                  Text('SUBSCRIBE FOR $_price/MONTH',
+                  Text(_annual
+                      ? 'SUBSCRIBE FOR $_annualTotal/YEAR'
+                      : 'SUBSCRIBE FOR $_price/MONTH',
                     style: AppText.button.copyWith(fontSize: 14)),
                 ]),
           )),
@@ -543,6 +687,132 @@ class _PaywallDialogState extends State<_PaywallDialog>
             fontSize: 12,
             fontWeight: FontWeight.w700,
             color: onTap == null ? AppColors.dim : AppColors.ink))),
+    );
+  }
+}
+
+
+// ── Promo code dialog ─────────────────────────────────────────────
+// ITSAGO codes (TUT pilot, sponsors, events) are checked on the server by
+// the redeemPromoCode Cloud Function, which grants Premium for a set number
+// of days. No bank card needed. Google Play codes are different: those are
+// redeemed inside the Google Play payment sheet ("Redeem code").
+class _PromoCodeDialog extends StatefulWidget {
+  const _PromoCodeDialog();
+
+  @override
+  State<_PromoCodeDialog> createState() => _PromoCodeDialogState();
+}
+
+class _PromoCodeDialogState extends State<_PromoCodeDialog> {
+  final _ctrl = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _redeem() async {
+    final code = _ctrl.text.trim().toUpperCase();
+    if (code.isEmpty || _busy) return;
+    setState(() { _busy = true; _error = null; });
+    try {
+      final res = await CloudFunctionService.redeemPromoCode(code);
+      if (!mounted) return;
+      if (res['ok'] == true) {
+        Analytics.promoRedeemed(code);
+        Navigator.of(context).pop(true);
+        return;
+      }
+      setState(() { _busy = false; _error = "Eish, that code didn't work. Check it and try again."; });
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      final msg = e.code == 'not-found'
+          ? "That code isn't valid. If it's a Google Play code, tap Subscribe "
+            "and choose 'Redeem code' in Google Play."
+          : (e.message ?? "Eish, that code didn't work. Try again.");
+      setState(() { _busy = false; _error = msg; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = "Couldn't check the code. Check your data or Wi-Fi and try again.";
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        decoration: AppDecorations.dialog,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('GOT A PROMO CODE?', style: AppText.title),
+            const SizedBox(height: 6),
+            Text('Enter the code from your university, sponsor or event.',
+              style: AppText.body.copyWith(fontSize: 12, color: AppColors.dim)),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              enabled: !_busy,
+              textCapitalization: TextCapitalization.characters,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _redeem(),
+              style: AppText.title.copyWith(letterSpacing: 2),
+              decoration: InputDecoration(
+                hintText: 'E.G. TUTPILOT',
+                filled: true,
+                fillColor: AppColors.light,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                border: const OutlineInputBorder(
+                  borderRadius: BorderRadius.zero,
+                  borderSide: BorderSide(color: AppColors.ink, width: 2)),
+                enabledBorder: const OutlineInputBorder(
+                  borderRadius: BorderRadius.zero,
+                  borderSide: BorderSide(color: AppColors.ink, width: 2)),
+                focusedBorder: const OutlineInputBorder(
+                  borderRadius: BorderRadius.zero,
+                  borderSide: BorderSide(color: AppColors.blue, width: 2)),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(_error!, style: AppText.body.copyWith(fontSize: 12, color: AppColors.red)),
+            ],
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(child: GestureDetector(
+                onTap: _busy ? null : () => Navigator.of(context).pop(false),
+                child: Container(
+                  height: 46,
+                  decoration: const BoxDecoration(color: AppColors.white, border: AppBorders.ink2),
+                  child: Center(child: Text('CANCEL', style: AppText.label))))),
+              const SizedBox(width: 10),
+              Expanded(child: GestureDetector(
+                onTap: _busy ? null : _redeem,
+                child: Container(
+                  height: 46,
+                  decoration: const BoxDecoration(
+                    color: AppColors.red, border: AppBorders.ink2,
+                    boxShadow: [AppShadows.hard3]),
+                  child: Center(child: _busy
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                    : Text('REDEEM', style: AppText.label.copyWith(color: Colors.white)))))),
+            ]),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,5 +1,7 @@
 ﻿import 'package:in_app_review/in_app_review.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
+import 'store_config.dart';
 
 class ReviewService {
   static const _kLastReviewKey   = 'last_review_prompt';
@@ -26,9 +28,11 @@ class ReviewService {
       await review.requestReview();
       await prefs.setString(_kLastReviewKey, DateTime.now().toIso8601String());
     } else {
-      // Fallback: open Play Store listing
+      // Fallback: open the store listing. iOS needs the numeric App Store
+      // ID, so skip until StoreConfig.appStoreId is filled in.
+      if (Platform.isIOS && StoreConfig.appStoreId.isEmpty) return;
       await review.openStoreListing(
-        appStoreId: 'com.itsago.interviewai',
+        appStoreId: StoreConfig.appStoreId,
       );
     }
   }

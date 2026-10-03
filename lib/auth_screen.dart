@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:io' show Platform;
 import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -127,6 +128,37 @@ class _AuthScreenState extends State<AuthScreen>
     }
   }
 
+  /// Sign in with Apple - iPhone only. Required by App Store guideline 4.8
+  /// because the app offers Google and Microsoft sign-in.
+  Future<void> _signInApple() async {
+    if (_loading || !_consentChecked) return;
+    setState(() => _loadingProvider = 'apple');
+    try {
+      final provider = AppleAuthProvider()
+        ..addScope('email')
+        ..addScope('name');
+      final cred = await FirebaseAuth.instance.signInWithProvider(provider);
+      await _completeSignIn(cred.user);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'canceled' || e.code == 'web-context-canceled' ||
+          e.code == 'unknown' && (e.message ?? '').contains('1001')) {
+        if (mounted) setState(() => _loadingProvider = null);
+        return; // user closed the Apple sheet
+      }
+      print('Apple sign-in FirebaseAuthException: code=${e.code} message=${e.message}');
+      if (mounted) {
+        setState(() => _loadingProvider = null);
+        _err('SIGN-IN FAILED', 'Could not sign in with Apple. Please try again.');
+      }
+    } catch (e) {
+      print('Apple sign-in error: $e');
+      if (mounted) {
+        setState(() => _loadingProvider = null);
+        _err('SIGN-IN FAILED', 'Could not sign in with Apple. Please try again.');
+      }
+    }
+  }
+
   Future<void> _signInMicrosoft() async {
     if (_loading || !_consentChecked) return;
     setState(() => _loadingProvider = 'microsoft');
@@ -212,7 +244,8 @@ class _AuthScreenState extends State<AuthScreen>
                   Text('SIGNING IN...',
                     style: AppText.label.copyWith(fontSize: 10)),
                   const SizedBox(height: 3),
-                  Text(_loadingProvider == 'google' ? 'Google' : 'Microsoft',
+                  Text(_loadingProvider == 'google' ? 'Google'
+                    : _loadingProvider == 'apple' ? 'Apple' : 'Microsoft',
                     style: AppText.caption),
                 ])))),
 
@@ -307,6 +340,29 @@ class _AuthScreenState extends State<AuthScreen>
                   ])),
 
                 const SizedBox(height: 20),
+
+                // Apple sign-in button - iPhone only, shown first as Apple expects
+                if (Platform.isIOS) ...[
+                  GestureDetector(
+                    onTap: (_loading || !_consentChecked) ? null : _signInApple,
+                    child: Container(
+                      width: double.infinity, height: 56,
+                      decoration: BoxDecoration(
+                        color: (_loading || !_consentChecked) ? AppColors.dim : Colors.black,
+                        border: AppBorders.ink2,
+                        boxShadow: (_loading || !_consentChecked)
+                          ? null : const [AppShadows.hard4]),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.apple, color: Colors.white, size: 26),
+                          const SizedBox(width: 12),
+                          Text('CONTINUE WITH APPLE',
+                            style: AppText.button.copyWith(
+                              color: Colors.white, letterSpacing: 1.5)),
+                        ]))),
+                  const SizedBox(height: 12),
+                ],
 
                 // Google sign-in button
                 GestureDetector(

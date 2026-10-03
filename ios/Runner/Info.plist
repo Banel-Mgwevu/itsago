@@ -59,6 +59,15 @@
 	     GoogleService-Info.plist (the REVERSED_CLIENT_ID field) once
 	     you've registered an iOS app in Firebase Console - it does not
 	     exist yet, so this is a placeholder. -->
+	<key>GIDClientID</key>
+	<string>415467037952-kl348b383pptjfklmoslheccguov717s.apps.googleusercontent.com</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- Show saved CVs in the Files app: On My iPhone > ITSAGO -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -66,7 +75,10 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>REPLACE_WITH_REVERSED_CLIENT_ID_FROM_GOOGLESERVICE_INFO_PLIST</string>
+				<!-- Google Sign-In: reversed iOS client ID -->
+				<string>com.googleusercontent.apps.415467037952-kl348b383pptjfklmoslheccguov717s</string>
+				<!-- Firebase Auth (Microsoft / Apple web flows): encoded iOS app ID -->
+				<string>app-1-415467037952-ios-84208b463d42a91f2f7fe5</string>
 			</array>
 		</dict>
 	</array>

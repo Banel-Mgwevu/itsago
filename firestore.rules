@@ -52,6 +52,19 @@ service cloud.firestore {
             || resource.data.retentionExpiry > request.time);
       }
     }
+    // -- Promo codes: only the redeemPromoCode Cloud Function touches these --
+    match /promo_codes/{document=**} {
+      allow read, write: if false;
+    }
+    // -- Sponsor reports: built nightly by a Cloud Function, console only --
+    match /promo_reports/{document=**} {
+      allow read, write: if false;
+    }
+    // -- Premium from promo codes: users can read their own, never write --
+    match /premium_grants/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
     match /admin/{document=**} {
       allow read, write: if request.auth != null
         && request.auth.token.email in [

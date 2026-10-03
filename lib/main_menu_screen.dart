@@ -11,11 +11,11 @@ import 'main.dart';
 import 'progress_screen.dart';
 import 'cv_library_screen.dart';
 import 'setup_screen.dart';
-import 'interview_mode_screen.dart';
 import 'ai_coach_screen.dart';
 import 'about_screen.dart';
 import 'privacy_rights_screen.dart';
 import 'ats_cv_builder_screen.dart';
+import 'cv_builder_choice_screen.dart';
 import 'purchase_service.dart';
 
 const Color _ink   = Color(0xFF1A1C2A);
@@ -277,15 +277,15 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                     sub: 'Practice video interview', accent: _red, badge: '',
                     icon: Icons.video_camera_front_rounded,
                     onTap: () async {
-                      if (mounted) _push(InterviewModeScreen(cameras: widget.cameras));
+                      if (mounted) _push(SetupScreen(cameras: widget.cameras));
                     })),
                 const SizedBox(height: 12),
                 FadeTransition(opacity: _fade(0.2, 0.6),
                   child: _card(title: 'ATS CV BUILDER',
-                    sub: 'Fix your CV to get noticed', accent: _amber, badge: 'NEW',
+                    sub: 'Build or revamp your CV', accent: _amber, badge: 'NEW',
                     icon: Icons.auto_fix_high_rounded,
                     onTap: () async {
-                      if (mounted) _push(ATSCVBuilderScreen(cameras: widget.cameras));
+                      if (mounted) _push(CvBuilderChoiceScreen(cameras: widget.cameras));
                     })),
                 const SizedBox(height: 12),
                 FadeTransition(opacity: _fade(0.25, 0.65),
@@ -565,14 +565,14 @@ class _MainMenuScreenState extends State<MainMenuScreen>
           sub: 'Practice video interview', accent: _red,
           onTap: () async {
             Navigator.pop(context);
-            if (mounted) _push(InterviewModeScreen(cameras: widget.cameras));
+            if (mounted) _push(SetupScreen(cameras: widget.cameras));
           }),
         const SizedBox(height: 10),
         _dItem(icon: Icons.auto_fix_high_rounded, title: 'ATS CV BUILDER',
-          sub: 'Fix your CV - get noticed', accent: _amber, badge: 'NEW',
+          sub: 'Build or revamp your CV', accent: _amber, badge: 'NEW',
           onTap: () async {
             Navigator.pop(context);
-            if (mounted) _push(ATSCVBuilderScreen(cameras: widget.cameras));
+            if (mounted) _push(CvBuilderChoiceScreen(cameras: widget.cameras));
           }),
         const SizedBox(height: 10),
         _dItem(icon: Icons.psychology_rounded, title: 'ASK AI COACH',
@@ -796,7 +796,7 @@ class _MainMenuScreenState extends State<MainMenuScreen>
                 Expanded(flex: 2, child: GestureDetector(
                   onTap: () {
                     Navigator.pop(dlg);
-                    _push(InterviewModeScreen(cameras: widget.cameras));
+                    _push(SetupScreen(cameras: widget.cameras));
                   },
                   child: Container(
                     height: 48,

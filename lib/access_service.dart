@@ -30,8 +30,8 @@ class AccessService {
   /// How many free video interviews before the paywall. 0 = paid from the first.
   static const int freeInterviews = 0;
 
-  /// How many free AI Coach messages before the paywall.
-  static const int freeAiCoachMessages = 2;
+  /// Free AI Coach messages per DAY. The count resets at midnight.
+  static const int freeAiCoachMessages = 3;
   // ────────────────────────────────────────────────────────────────
 
   /// The day paid gating went live. Accounts created before this date are
@@ -58,7 +58,24 @@ class AccessService {
   static Future<bool> hasFullAccess() async {
     if (!paywallEnabled) return true;
     if (_isGrandfathered) return true;
+    if (await hasPromoAccess()) return true;
     return PremiumStatus.isPremium();
+  }
+
+  /// Premium granted by a promo code (TUT pilot, sponsors, events).
+  /// Written ONLY by the redeemPromoCode Cloud Function - users can read
+  /// their own grant but can't create or extend it themselves.
+  static Future<bool> hasPromoAccess() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('premium_grants').doc(uid).get();
+      final until = doc.data()?['until'];
+      return until is Timestamp && until.toDate().isAfter(DateTime.now());
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Video interviews (normal and job specific). Paid from the first one
@@ -87,7 +104,7 @@ class AccessService {
   /// downloading, sharing and exporting are paid.
   static Future<bool> canDownloadCV() => hasFullAccess();
 
-  /// AI Coach: [freeAiCoachMessages] free messages per account, then paid.
+  /// AI Coach: [freeAiCoachMessages] free messages per day, then paid.
   static Future<bool> canSendAiCoachMessage() async {
     if (await hasFullAccess()) return true;
     return (await aiCoachMessagesUsed()) < freeAiCoachMessages;
@@ -96,17 +113,29 @@ class AccessService {
   /// Free messages used so far. Stored on the phone AND on the user's
   /// Firestore doc, and the higher number wins - so reinstalling the app
   /// or clearing its data doesn't reset the free messages.
+  /// Today's date as yyyy-mm-dd - the free count is kept per day.
+  static String get _today {
+    final n = DateTime.now();
+    return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Free messages used TODAY. Stored on the phone AND on the user's
+  /// Firestore doc (per day), and the higher number wins - so reinstalling
+  /// the app doesn't give extra messages the same day.
   static Future<int> aiCoachMessagesUsed() async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    final day = _today;
+    final key = 'ai_coach_free_${uid}_$day';
     final prefs = await SharedPreferences.getInstance();
-    int used = prefs.getInt('ai_coach_free_used_$uid') ?? 0;
+    int used = prefs.getInt(key) ?? 0;
     if (uid != 'guest') {
       try {
         final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-        final remote = (doc.data()?['aiCoachFreeMessagesUsed'] as num?)?.toInt() ?? 0;
+        final byDay = doc.data()?['aiCoachFreeByDay'];
+        final remote = byDay is Map ? ((byDay[day] as num?)?.toInt() ?? 0) : 0;
         if (remote > used) {
           used = remote;
-          await prefs.setInt('ai_coach_free_used_$uid', used);
+          await prefs.setInt(key, used);
         }
       } catch (_) {
         // Offline - the local count is still enforced.
@@ -118,14 +147,21 @@ class AccessService {
   /// Call after each successful free AI Coach reply.
   static Future<void> recordAiCoachMessage() async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    final day = _today;
+    final key = 'ai_coach_free_${uid}_$day';
     final prefs = await SharedPreferences.getInstance();
-    final used = (prefs.getInt('ai_coach_free_used_$uid') ?? 0) + 1;
-    await prefs.setInt('ai_coach_free_used_$uid', used);
+    await prefs.setInt(key, (prefs.getInt(key) ?? 0) + 1);
     if (uid != 'guest') {
       try {
-        await FirebaseFirestore.instance.collection('users').doc(uid).set(
-          {'aiCoachFreeMessagesUsed': FieldValue.increment(1)},
-          SetOptions(merge: true));
+        // Only today's count is kept on the server - older days are dropped.
+        final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+        final doc = await ref.get();
+        final byDay = doc.data()?['aiCoachFreeByDay'];
+        final current = byDay is Map ? ((byDay[day] as num?)?.toInt() ?? 0) : 0;
+        await ref.update({'aiCoachFreeByDay': {day: current + 1}})
+            .catchError((_) => ref.set(
+              {'aiCoachFreeByDay': {day: current + 1}},
+              SetOptions(merge: true)));
       } catch (_) {}
     }
   }

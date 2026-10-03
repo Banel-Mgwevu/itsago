@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'main.dart';
+import 'ats_cv_builder_screen.dart';
 
 // Data models for multiple entries
 class WorkExperience {
@@ -1756,6 +1757,74 @@ class _ResumeBuilderScreenState extends State<ResumeBuilderScreen> {
     );
   }
 
+  /// Turns the form into the CV data the design engine uses, then opens
+  /// the design picker with 4 free designs.
+  void _openDesigns() {
+    List<String> lines(String text) => text
+        .split(RegExp(r'\n'))
+        .map((l) => l.trim().replaceFirst(RegExp(r'^[-\u2022*]+\s*'), ''))
+        .where((l) => l.isNotEmpty)
+        .toList();
+
+    final experience = _workExperiences
+        .where((e) => e.jobTitleController.text.trim().isNotEmpty ||
+                      e.companyController.text.trim().isNotEmpty)
+        .map((e) {
+          final desc = e.descriptionController.text.trim();
+          final bullets = lines(desc);
+          return <String, dynamic>{
+            'title':       e.jobTitleController.text.trim(),
+            'company':     e.companyController.text.trim(),
+            'duration':    e.durationController.text.trim(),
+            'description': desc,
+            'bullets':     bullets.length > 1 ? bullets : <String>[],
+          };
+        })
+        .toList();
+
+    final education = _educations
+        .where((e) => e.degreeController.text.trim().isNotEmpty ||
+                      e.schoolController.text.trim().isNotEmpty)
+        .map((e) => <String, dynamic>{
+              'degree':      e.degreeController.text.trim(),
+              'institution': e.schoolController.text.trim(),
+              'year':        e.graduationController.text.trim(),
+            })
+        .toList();
+
+    final skills = _skillsController.text
+        .split(RegExp(r'[,\n]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    // Headline: most recent job title, else qualification.
+    String headline = '';
+    if (experience.isNotEmpty) headline = experience.first['title'] as String;
+    if (headline.isEmpty && education.isNotEmpty) headline = education.first['degree'] as String;
+
+    final data = <String, dynamic>{
+      'name':           _nameController.text.trim(),
+      'headline':       headline,
+      'email':          _emailController.text.trim(),
+      'phone':          _phoneController.text.trim(),
+      'location':       _locationController.text.trim(),
+      'linkedin':       '',
+      'summary':        _summaryController.text.trim(),
+      'experience':     experience,
+      'education':      education,
+      'skills':         skills,
+      'certifications': <String>[],
+      'achievements':   <String>[],
+      'awards':         <String>[],
+      'languages':      <String>[],
+    };
+
+    _saveResumeData(); // keep their progress
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ATSCVBuilderScreen(cameras: widget.cameras, buildData: data)));
+  }
+
   Future<pw.Document> _generatePDF() async {
     final pdf = pw.Document();
 
@@ -2327,8 +2396,8 @@ class _ResumeBuilderScreenState extends State<ResumeBuilderScreen> {
                       );
                     }
                   } else {
-                    // Finish - show completion dialog
-                    _showCompletionDialog();
+                    // Finish - generate 4 CV designs to choose from
+                    _openDesigns();
                   }
                 },
                 child: Text(

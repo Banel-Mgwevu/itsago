@@ -4,6 +4,7 @@ import 'app_theme.dart';
 import 'loading_screen.dart';
 import 'app_config.dart';
 import 'paywall.dart';
+import 'analytics_service.dart';
 
 class SetupScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -17,6 +18,11 @@ class _SetupScreenState extends State<SetupScreen>
 
   final _companyCtrl = TextEditingController();
   bool _companyError = false;
+
+  // Optional: the role they're practising for
+  bool _showRole = false;
+  final _roleCtrl = TextEditingController();
+  final _roleNotesCtrl = TextEditingController();
   List<String> _selectedCategories = ['behavioural','situational','values','strength'];
 
   late final AnimationController _entryCtrl = AnimationController(
@@ -33,6 +39,8 @@ class _SetupScreenState extends State<SetupScreen>
   @override
   void dispose() {
     _companyCtrl.dispose();
+    _roleCtrl.dispose();
+    _roleNotesCtrl.dispose();
     _entryCtrl.dispose();
     super.dispose();
   }
@@ -50,6 +58,7 @@ class _SetupScreenState extends State<SetupScreen>
     final allowed = await Paywall.ensureAccess(context, PaywallFeature.interview);
     _starting = false;
     if (!allowed || !mounted) return;
+    Analytics.interviewStarted(_showRole && _roleCtrl.text.trim().isNotEmpty);
 
     Navigator.of(context).push(PageRouteBuilder(
       pageBuilder: (_, __, ___) => LoadingScreen(
@@ -58,6 +67,8 @@ class _SetupScreenState extends State<SetupScreen>
         interviewStyle:     'friendly',
         questionCategories: _selectedCategories,
         company:            _companyCtrl.text.trim(),
+        roleTitle:          _showRole ? _roleCtrl.text.trim() : '',
+        roleNotes:          _showRole ? _roleNotesCtrl.text.trim() : '',
         apiKey:             AppConfig.geminiApiKey),
       transitionsBuilder: (_, a, __, child) => SlideTransition(
         position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
@@ -139,6 +150,8 @@ class _SetupScreenState extends State<SetupScreen>
                           Text('Company name is required',
                             style: AppText.caption.copyWith(color: AppColors.red)),
                         ])),
+                    const SizedBox(height: 14),
+                    _roleSection(),
                   ]))),
 
               const SizedBox(height: 24),
@@ -147,7 +160,7 @@ class _SetupScreenState extends State<SetupScreen>
               FadeTransition(opacity: _fade(0.35, 0.8),
                 child: SlideTransition(position: _slide(0.35, 0.8),
                   child: Row(children: [
-                    _infoTile(Icons.timer_rounded,     '20 SEC', 'per answer', AppColors.amber),
+                    _infoTile(Icons.timer_rounded,     '2 MIN',  'per answer', AppColors.amber),
                     const SizedBox(width: 10),
                     _infoTile(Icons.quiz_rounded,      '5',      'questions',  AppColors.red),
                     const SizedBox(width: 10),
@@ -225,6 +238,84 @@ class _SetupScreenState extends State<SetupScreen>
           boxShadow: on ? const [AppShadows.hard3] : null),
         child: Text(label.toUpperCase(), style: AppText.label.copyWith(
           color: on ? Colors.white : AppColors.dim, fontSize: 8))));
+  }
+
+  /// Optional role. Collapsed: one outlined button. Open: job title and
+  /// an optional job description. Keeps the normal interview quick, but
+  /// lets people aim the questions at the job they actually want.
+  Widget _roleSection() {
+    InputDecoration deco(String hint) => InputDecoration(
+      hintText: hint,
+      hintStyle: AppText.caption,
+      contentPadding: const EdgeInsets.all(14),
+      border: InputBorder.none);
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: !_showRole
+        ? GestureDetector(
+            onTap: () => setState(() => _showRole = true),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.light,
+                border: Border.all(color: AppColors.ink, width: 1.5)),
+              child: Row(children: [
+                const Icon(Icons.add_rounded, color: AppColors.ink, size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('ADD THE ROLE YOU\'RE PRACTISING FOR',
+                    style: AppText.label.copyWith(color: AppColors.ink, fontSize: 10.5)),
+                  const SizedBox(height: 3),
+                  Text('Optional. Get questions that fit the job.',
+                    style: AppText.caption),
+                ])),
+              ])))
+        : Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: AppColors.white, border: AppBorders.ink2, boxShadow: [AppShadows.hard4]),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Expanded(child: Text('THE ROLE',
+                  style: AppText.label.copyWith(color: AppColors.ink))),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _showRole = false;
+                    _roleCtrl.clear();
+                    _roleNotesCtrl.clear();
+                  }),
+                  child: Text('REMOVE', style: AppText.label.copyWith(color: AppColors.red))),
+              ]),
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(border: Border.all(color: AppColors.ink, width: 2)),
+                child: TextField(
+                  controller: _roleCtrl,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  style: AppText.body,
+                  decoration: deco('Job title, e.g. Cashier, Junior Developer'))),
+              const SizedBox(height: 12),
+              Text('JOB DESCRIPTION (OPTIONAL)',
+                style: AppText.label.copyWith(color: AppColors.dim, fontSize: 10)),
+              const SizedBox(height: 6),
+              Container(
+                decoration: BoxDecoration(border: Border.all(color: AppColors.mist, width: 2)),
+                child: TextField(
+                  controller: _roleNotesCtrl,
+                  minLines: 3,
+                  maxLines: 6,
+                  keyboardType: TextInputType.multiline,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: AppText.body.copyWith(fontSize: 13),
+                  decoration: deco('Paste a few lines from the job ad, or describe the role in your own words.'))),
+            ])),
+    );
   }
 
   Widget _infoTile(IconData icon, String val, String sub, Color accent) {

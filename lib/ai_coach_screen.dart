@@ -13,6 +13,7 @@ import 'progress_service.dart';
 import 'purchase_service.dart';
 import 'access_service.dart';
 import 'paywall.dart';
+import 'analytics_service.dart';
 
 class AiCoachScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -313,6 +314,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           _saveChat();
           // Only successful replies use up a free message.
           if (!_unlimited) AccessService.recordAiCoachMessage();
+          Analytics.coachMessage(_unlimited);
         }
     } catch (_) {
       if (mounted) setState(() {

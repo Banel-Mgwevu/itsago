@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'cv_storage_service.dart';
@@ -32,6 +34,15 @@ void main() async {
     // Enforce POPIA 30-day retention on startup
   CVStorageService.purgeExpired().catchError((_) {});
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+    // Crash reporting: every uncaught Flutter and Dart error goes to
+    // Firebase Console > Crashlytics. Off in debug so testing stays quiet.
+    await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(!kDebugMode);
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
 
     // Initialize in-app purchase / subscription handling. Wrapped so a
     // store-connection issue (e.g. no network, store unavailable) never

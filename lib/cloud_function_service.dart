@@ -3,6 +3,15 @@
 class CloudFunctionService {
   static final _functions = FirebaseFunctions.instance;
 
+  /// Redeems an ITSAGO promo code on the server. Returns {ok, days, until}.
+  /// Throws FirebaseFunctionsException (e.g. code 'not-found') on failure.
+  static Future<Map<String, dynamic>> redeemPromoCode(String code) async {
+    final result = await _functions
+        .httpsCallable('redeemPromoCode')
+        .call({'code': code});
+    return Map<String, dynamic>.from(result.data as Map);
+  }
+
   // AI text generation - now routed to Google Gemini. The method keeps
   // its original name and signature so the 12 existing call sites across
   // the app don't need to change: the Cloud Function accepts this exact

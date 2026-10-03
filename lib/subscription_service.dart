@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'analytics_service.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart'
     show InAppPurchaseAndroidPlatformAddition, GooglePlayProductDetails;
 import 'package:in_app_purchase_android/billing_client_wrappers.dart'
@@ -32,9 +33,36 @@ class SubscriptionService {
   Stream<SubscriptionEvent> get events => _events.stream;
 
   /// The R80/month base plan as loaded from Google Play (null until loaded).
-  ProductDetails? get monthlyProduct {
+  ProductDetails? get monthlyProduct => _findPlan(monthlyBasePlanId);
+
+  /// The R828/year base plan (null until loaded, or if it isn't live yet).
+  ProductDetails? get annualProduct => _findPlan(annualBasePlanId);
+
+  ProductDetails? _findPlan(String basePlanId) {
+    if (Platform.isIOS) {
+      final wanted = basePlanId == annualBasePlanId
+          ? iosAnnualProductId
+          : iosMonthlyProductId;
+      for (final p in _products) {
+        if (p.id == wanted) return p;
+      }
+      return null;
+    }
     for (final p in _products) {
-      if (p.id == monthlyProductId) return p;
+      if (p.id != monthlyProductId) continue;
+      final plan = _basePlanOf(p);
+      // iOS / non-Play products have no base plan - treat as monthly.
+      if (plan == basePlanId || (plan == null && basePlanId == monthlyBasePlanId)) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  static String? _basePlanOf(ProductDetails p) {
+    if (p is GooglePlayProductDetails && p.subscriptionIndex != null) {
+      return p.productDetails
+          .subscriptionOfferDetails![p.subscriptionIndex!].basePlanId;
     }
     return null;
   }
@@ -45,6 +73,10 @@ class SubscriptionService {
   static const String monthlyProductId = 'itsago_paid';
   static const String monthlyBasePlanId = 'itsagopaid';
 
+  /// Annual base plan on the SAME subscription (R828/year = R69 x 12).
+  /// Create it in Play Console: itsago_paid > Add base plan > "itsagoannual".
+  static const String annualBasePlanId = 'itsagoannual';
+
   /// Kept only for backwards compatibility with the old product id. It is
   /// no longer sold, but anyone still holding an active one keeps premium.
   static const String annualProductId = 'itsago_annual_prod';
@@ -53,14 +85,28 @@ class SubscriptionService {
     'itsago_annual_prod',
   };
 
-  /// Products the paywall loads and sells.
+  /// Products the paywall loads and sells on Android.
   static const Set<String> _kProductIds = <String>{
     monthlyProductId,
   };
 
+  /// App Store has no "base plans": monthly and annual are two separate
+  /// auto-renewable products in one subscription group ("ITSAGO Premium").
+  /// Create them in App Store Connect with exactly these IDs.
+  static const String iosMonthlyProductId = 'itsago_premium_monthly';
+  static const String iosAnnualProductId  = 'itsago_premium_annual';
+  static const Set<String> _kIosProductIds = <String>{
+    iosMonthlyProductId,
+    iosAnnualProductId,
+  };
+
+  static Set<String> get _productIdsForPlatform =>
+      Platform.isIOS ? _kIosProductIds : _kProductIds;
+
   /// Every product id that grants premium (current + legacy).
   static final Set<String> _kEntitlementProductIds = <String>{
     ..._kProductIds,
+    ..._kIosProductIds,
     ..._kLegacyProductIds,
   };
 
@@ -120,7 +166,7 @@ class SubscriptionService {
 
   Future<void> _loadProducts() async {
     try {
-      final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(_kProductIds);
+      final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(_productIdsForPlatform);
       
       if (response.notFoundIDs.isNotEmpty) {
         if (kDebugMode) {
@@ -150,6 +196,7 @@ class SubscriptionService {
   List<ProductDetails> _pickBasePlanOffers(List<ProductDetails> all) {
     if (!Platform.isAndroid) return all;
 
+    const wantedPlans = {monthlyBasePlanId, annualBasePlanId};
     final Map<String, ProductDetails> picked = {};
     for (final product in all) {
       if (product is GooglePlayProductDetails &&
@@ -157,11 +204,12 @@ class SubscriptionService {
         final offer = product.productDetails
             .subscriptionOfferDetails![product.subscriptionIndex!];
         final isWantedBasePlan = product.id == monthlyProductId
-            ? offer.basePlanId == monthlyBasePlanId
+            ? wantedPlans.contains(offer.basePlanId)
             : true;
         // offerId == null means the base plan itself, not a promo offer.
+        // Keyed per base plan so monthly and annual both survive.
         if (isWantedBasePlan && offer.offerId == null) {
-          picked[product.id] = product;
+          picked['${product.id}:${offer.basePlanId}'] = product;
         }
       } else {
         picked.putIfAbsent(product.id, () => product);
@@ -228,6 +276,19 @@ class SubscriptionService {
       }
       rethrow;
     }
+  }
+
+  /// Buys a specific base plan (monthly or annual) - use this from the
+  /// paywall, since both plans share the product id "itsago_paid".
+  Future<bool> purchaseProduct(ProductDetails productDetails) async {
+    if (!_isAvailable) throw Exception('Store not available');
+    if (kDebugMode) {
+      print('SubscriptionService: Starting purchase for '
+          '${productDetails.id} (${_basePlanOf(productDetails) ?? 'default'})');
+    }
+    return _inAppPurchase.buyNonConsumable(
+      purchaseParam: PurchaseParam(productDetails: productDetails),
+    );
   }
 
   Future<void> restorePurchases() async {
@@ -521,6 +582,16 @@ class SubscriptionService {
     if (purchaseDetails.status == PurchaseStatus.purchased ||
         purchaseDetails.status == PurchaseStatus.restored) {
       
+      // iOS restore returns old transactions too - ignore ones whose
+      // period has already ended (renewals arrive as new transactions).
+      final iosExpiry = _iosExpiryFor(purchaseDetails);
+      if (iosExpiry != null && iosExpiry.isBefore(DateTime.now())) {
+        if (purchaseDetails.pendingCompletePurchase) {
+          await _inAppPurchase.completePurchase(purchaseDetails);
+        }
+        return;
+      }
+
       // Verify purchase on your server here if needed
       bool isValid = await _verifyPurchase(purchaseDetails);
       
@@ -529,14 +600,20 @@ class SubscriptionService {
         onPurchaseSuccess?.call();
         onPremiumStatusChanged?.call(true);
         _events.add(const SubscriptionEvent(SubscriptionEventType.success));
+        Analytics.setPremium(true);
+        if (purchaseDetails.status == PurchaseStatus.purchased) {
+          Analytics.subscribed(purchaseDetails.productID);
+        }
         
         if (kDebugMode) {
           print('SubscriptionService: Purchase successful for ${purchaseDetails.productID}');
         }
       } else {
         onPurchaseError?.call('Purchase verification failed');
-        _events.add(const SubscriptionEvent(SubscriptionEventType.error,
-            "Google Play couldn't confirm this payment. Tap Restore purchase."));
+        _events.add(SubscriptionEvent(SubscriptionEventType.error,
+            Platform.isIOS
+            ? "The App Store couldn't confirm this payment. Tap Restore purchase."
+            : "Google Play couldn't confirm this payment. Tap Restore purchase."));
       }
       
     } else if (purchaseDetails.status == PurchaseStatus.error) {
@@ -605,6 +682,8 @@ class SubscriptionService {
         'purchaseId': purchaseDetails.purchaseID ?? '',
         'purchaseDate': DateTime.now(),
         'isActive': true,
+        if (_iosExpiryFor(purchaseDetails) != null)
+          'expiryDate': _iosExpiryFor(purchaseDetails),
       };
 
       // Save to local storage first
@@ -633,7 +712,40 @@ class SubscriptionService {
   /// returns subscriptions that are still paid up (including grace period),
   /// so if none of ours come back the user cancelled and it has run out.
   /// Fails open: if Play can't be reached, nothing is changed.
+  /// iOS: end of the paid period for this transaction, with a 2-day buffer
+  /// for Apple's billing retries. Null on Android or if the date is unknown.
+  DateTime? _iosExpiryFor(PurchaseDetails p) {
+    if (!Platform.isIOS) return null;
+    final ms = int.tryParse(p.transactionDate ?? '');
+    if (ms == null) return null;
+    final start = DateTime.fromMillisecondsSinceEpoch(ms);
+    final days = p.productID == iosAnnualProductId ? 366 : 31;
+    return start.add(Duration(days: days + 2));
+  }
+
+  /// iOS: switch premium off once the last known paid period has ended
+  /// and no renewal has arrived. (Full server-side App Store verification
+  /// is planned together with the Google Play server check.)
+  Future<void> _refreshIosEntitlement() async {
+    try {
+      final data = await _getSubscriptionFromFirestore();
+      if (data == null || data['platform'] != 'ios') return;
+      final expiry = data['expiryDate'];
+      final active = (data['isPremium'] ?? false) == true && (data['isActive'] ?? false) == true;
+      if (active && expiry is DateTime && expiry.isBefore(DateTime.now())) {
+        await _deactivatePremium();
+        onPremiumStatusChanged?.call(false);
+      }
+    } catch (e) {
+      if (kDebugMode) print('SubscriptionService: iOS entitlement check failed: $e');
+    }
+  }
+
   Future<void> _refreshEntitlement() async {
+    if (Platform.isIOS) {
+      await _refreshIosEntitlement();
+      return;
+    }
     if (!Platform.isAndroid || !_isAvailable) return;
 
     try {
@@ -692,7 +804,7 @@ class SubscriptionService {
         'userId': user.uid,
         'isPremium': false,
         'isActive': false,
-        'platform': 'android',
+        'platform': Platform.isIOS ? 'ios' : 'android',
         'expiredAt': FieldValue.serverTimestamp(),
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));

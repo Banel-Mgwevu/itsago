@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'paywall.dart';
+import 'store_config.dart';
+import 'analytics_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
@@ -40,7 +42,12 @@ class _Gap {
 
 class ATSCVBuilderScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
-  const ATSCVBuilderScreen({super.key, required this.cameras});
+
+  /// Set when coming from the free "Build your CV" form: skips upload and
+  /// AI, generates 4 designs from this data, and has no paywall.
+  final Map<String, dynamic>? buildData;
+
+  const ATSCVBuilderScreen({super.key, required this.cameras, this.buildData});
   @override
   State<ATSCVBuilderScreen> createState() => _ATSCVBuilderScreenState();
 }
@@ -69,6 +76,11 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   String _processingMsg = 'Reading your CV...';
   double _genProgress   = 0.0;
   static const _designNames = ['EXECUTIVE', 'SPECTRUM', 'MINIMAL', 'GRID', 'UBUNTU', 'VIVID'];
+
+  /// Free "Build your CV" path: 4 designs. Revamp (premium): all 6.
+  static const _freeDesigns = [0, 2, 3, 4]; // Executive, Minimal, Grid, Ubuntu
+  bool get _freeBuild => widget.buildData != null;
+  List<int> get _visible => _freeBuild ? _freeDesigns : const [0, 1, 2, 3, 4, 5];
   String? _docErrorType;
   int _savedCount = 0;
   String? _docErrorMsg;
@@ -115,6 +127,12 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   }
 
   Future<void> _init() async {
+    if (_freeBuild) {
+      _optimized = Map<String, dynamic>.from(widget.buildData!);
+      _selectedDesign = _freeDesigns.first;
+      await _generateFreeDesigns();
+      return;
+    }
     final prefs    = await SharedPreferences.getInstance();
     final accepted = prefs.getBool('ats_privacy_accepted') ?? false;
     if (accepted) {
@@ -141,7 +159,8 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _state == _S.privacy || _state == _S.upload,
+      canPop: _state == _S.privacy || _state == _S.upload ||
+          (_freeBuild && (_state == _S.designPicker || _state == _S.generating)),
       onPopInvoked: (didPop) {
         if (!didPop) {
           if (_state == _S.success)           setState(() => _state = _S.download);
@@ -506,7 +525,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
   }
 
   Widget _generatingUI() {
-    final current = (_genProgress * 4).floor().clamp(0, 3);
+    final current = (_genProgress * _visible.length).floor().clamp(0, _visible.length - 1);
     return Center(child: Padding(padding: const EdgeInsets.all(40),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         SizedBox(width: 100, height: 100,
@@ -519,7 +538,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
         const SizedBox(height: 28),
         Text('BUILDING YOUR DREAM CVS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.blue, letterSpacing: 2)),
         const SizedBox(height: 6),
-        Text('Crafting ${_designNames[current]} design...', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.dim, letterSpacing: 1)),
+        Text('Crafting ${_designNames[_visible[current]]} design...', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.dim, letterSpacing: 1)),
         const SizedBox(height: 24),
         Container(width: double.infinity, height: 10,
           decoration: BoxDecoration(color: AppColors.cream, border: Border.all(color: AppColors.ink, width: 2)),
@@ -528,9 +547,10 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
         Text('${(_genProgress * 100).toInt()}%', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.ink)),
         Wrap(alignment: WrapAlignment.center, spacing: 4, runSpacing: 4,
 
-          children: List.generate(6, (i) {
-            final done   = i < current;
-            final active = i == current && _genProgress < 1.0;
+          children: List.generate(_visible.length, (k) {
+            final i      = _visible[k];
+            final done   = k < current;
+            final active = k == current && _genProgress < 1.0;
             return Container(
               margin: const EdgeInsets.symmetric(horizontal: 2),
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
@@ -562,8 +582,9 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
 
 
 
-        itemCount: 6,
-        itemBuilder: (ctx, i) {
+        itemCount: _visible.length,
+        itemBuilder: (ctx, k) {
+          final i = _visible[k];
           final isSelected = _selectedDesign == i;
           return GestureDetector(
             onTap: () => setState(() => _selectedDesign = i),
@@ -593,7 +614,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
                     const Spacer(),
                     GestureDetector(
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _ATSPreviewPage(
-                        data: _optimized, designIndex: i, onSelect: () { Navigator.pop(context); setState(() { _selectedDesign = i; _state = _S.download; }); }))),
+                        data: _optimized, designIndex: i, onSelect: () { Navigator.pop(context); _useDesign(i); }))),
                       child: Icon(isSelected ? Icons.fullscreen : Icons.remove_red_eye, color: isSelected ? AppColors.blue : AppColors.dim, size: 16)),
                   ])),  // Row closes + bottom Container closes
               ]),  // Column children closes
@@ -603,10 +624,7 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
       )),  // ListView.builder + Expanded closes
       Container(width: double.infinity, padding: const EdgeInsets.all(16), color: Colors.white,
         child: GestureDetector(
-          onTap: () {
-            setState(() => _state = _S.download);
-            ReviewService.onCVGenerated();
-          },
+          onTap: () => _useDesign(_selectedDesign, askForReview: true),
           child: Container(width: double.infinity, height: 52,
             decoration: BoxDecoration(color: AppColors.blue, border: Border.all(color: AppColors.ink, width: 2), boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(4,4), blurRadius: 0)]),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -839,7 +857,9 @@ class _ATSCVBuilderScreenState extends State<ATSCVBuilderScreen> {
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('YOUR JOB-READY CV IS SET!', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2)),
-              Text('${labels[_selectedDesign]} design - ATS-optimized', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.amber)),
+              Text(_freeBuild
+                  ? '${labels[_selectedDesign]} design - ready to send'
+                  : '${labels[_selectedDesign]} design - ATS-optimized', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.amber)),
             ])),
           ])),
         const SizedBox(height: 16),
@@ -1292,6 +1312,29 @@ Max 5 gaps. Return ONLY the JSON.''';
           ]))));
   }
 
+  /// Free "Build your CV" path: no AI, no upload. Renders the 4 free
+  /// designs straight from the form data. Nothing is saved to the
+  /// Revamp session, so it never mixes with a premium CV.
+  Future<void> _generateFreeDesigns() async {
+    setState(() { _state = _S.generating; _genProgress = 0.0; });
+    try {
+      final gens = [_execDesign, _spectrumDesign, _minimalDesign, _gridDesign, _ubuntuDesign, _vividDesign];
+      _pdfs
+        ..clear()
+        ..addAll(List<Uint8List>.filled(gens.length, Uint8List(0)));
+      for (int k = 0; k < _freeDesigns.length; k++) {
+        final i = _freeDesigns[k];
+        _pdfs[i] = await gens[i]();
+        if (!mounted) return;
+        setState(() => _genProgress = (k + 1) / _freeDesigns.length);
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      if (mounted) setState(() => _state = _S.designPicker);
+    } catch (e) {
+      _err('Could not create your CV designs: $e');
+    }
+  }
+
   Future<void> _startGenerating() async {
     setState(() { _state = _S.generating; _genProgress = 0.0; });
     try {
@@ -1608,7 +1651,25 @@ Max 5 gaps. Return ONLY the JSON.''';
   /// for every way the finished file can leave the app (download, share,
   /// WhatsApp), so nobody can bypass the paywall by tapping "share"
   /// instead of "download".
+  /// "USE [DESIGN]" / "USE THIS": Premium starts here. Free users see
+  /// their generated designs, but the paywall opens as soon as they pick
+  /// one to use. The download buttons stay gated too, as a backstop.
+  bool _openingDesign = false;
+  Future<void> _useDesign(int i, {bool askForReview = false}) async {
+    if (_openingDesign) return;
+    setState(() => _selectedDesign = i);
+    _openingDesign = true;
+    final allowed = _freeBuild ||
+        await Paywall.ensureAccess(context, PaywallFeature.cvDownload);
+    _openingDesign = false;
+    if (!allowed || !mounted) return;
+    Analytics.cvDesignChosen(_designNames[i], _freeBuild);
+    setState(() => _state = _S.download);
+    if (askForReview) ReviewService.onCVGenerated();
+  }
+
   Future<bool> _canExport() async {
+    if (_freeBuild) return true; // free "Build your CV" path
     if (!mounted) return false;
     return Paywall.ensureAccess(context, PaywallFeature.cvDownload);
   }
@@ -1616,12 +1677,13 @@ Max 5 gaps. Return ONLY the JSON.''';
   Future<void> _downloadPDF() async {
     if (_pdfs.isEmpty) return;
     if (!await _canExport()) return;
+    Analytics.cvExported('pdf', _freeBuild);
     try {
       final dir  = await _saveDir();
       final name = '${_safeName()}_CV_${_designNames[_selectedDesign]}_${_ts()}.pdf';
       await File('${dir.path}/$name').writeAsBytes(_pdfs[_selectedDesign]);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('PDF saved to Downloads', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        content: Text(Platform.isIOS ? 'PDF saved to Files > On My iPhone > ITSAGO' : 'PDF saved to Downloads', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         backgroundColor: AppColors.blue, duration: const Duration(seconds: 3)));
     } catch (e) { _err('Could not save PDF: $e'); }
   }
@@ -1629,12 +1691,13 @@ Max 5 gaps. Return ONLY the JSON.''';
   Future<void> _downloadWord() async {
     if (_optimized.isEmpty) return;
     if (!await _canExport()) return;
+    Analytics.cvExported('word', _freeBuild);
     try {
       final dir  = await _saveDir();
       final name = '${_safeName()}_CV_${_designNames[_selectedDesign]}_${_ts()}.docx';
       await File('${dir.path}/$name').writeAsBytes(_buildDocx());
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Word document saved to Downloads', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        content: Text(Platform.isIOS ? 'Word document saved to Files > On My iPhone > ITSAGO' : 'Word document saved to Downloads', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         backgroundColor: AppColors.blue, duration: const Duration(seconds: 3)));
     } catch (e) { _err('Could not save Word document: $e'); }
   }
@@ -1642,6 +1705,7 @@ Max 5 gaps. Return ONLY the JSON.''';
   Future<void> _share() async {
     if (_pdfs.isEmpty) return;
     if (!await _canExport()) return;
+    Analytics.cvExported('share', _freeBuild);
     try {
       final tmp  = await getTemporaryDirectory();
       final file = File('${tmp.path}/${_safeName()}_CV.pdf');
@@ -1653,6 +1717,7 @@ Max 5 gaps. Return ONLY the JSON.''';
   Future<void> _shareWhatsApp() async {
     if (_pdfs.isEmpty) return;
     if (!await _canExport()) return;
+    Analytics.cvExported('whatsapp', _freeBuild);
     try {
       final tmp  = await getTemporaryDirectory();
       final file = File('${tmp.path}/${_safeName()}_CV.pdf');
@@ -1662,9 +1727,12 @@ Max 5 gaps. Return ONLY the JSON.''';
       await Share.shareXFiles(
         [XFile(file.path)],
         subject: '${_s('name')} - Job-Ready ATS CV',
-        text: 'My CV went from $before% to $after% with ITSAGO AI! '
+        text: _freeBuild
+            ? 'I built my CV with ITSAGO AI. '
+              'Build yours free: ${StoreConfig.shareLink}'
+            : 'My CV went from $before% to $after% with ITSAGO AI! '
               'Download the free app to build your job-ready ATS CV: '
-              'https://play.google.com/store/apps/details?id=com.itsago.interviewai',
+              '${StoreConfig.shareLink}',
       );
     } catch (e) { if (mounted) _err('Could not share: $e'); }
   }
@@ -1682,8 +1750,8 @@ Max 5 gaps. Return ONLY the JSON.''';
     String esc(String s) => s.replaceAll('\u2013', '-').replaceAll('\u2014', '-').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 
     // Design colours based on selected design
-    final headerBg = ['1C1C3A','2E4057','333333','1565C0'][_selectedDesign];
-    final accentHex = ['D4AF37','048A81','333333','E53935'][_selectedDesign];
+    final headerBg = ['1C1C3A','2E4057','333333','1565C0','2D6A4F','6B2D8B'][_selectedDesign];
+    final accentHex = ['D4AF37','048A81','333333','E53935','D4AF37','F2C14E'][_selectedDesign];
 
     String rgb(String hex) => '${int.parse(hex.substring(0,2),radix:16)} ${int.parse(hex.substring(2,4),radix:16)} ${int.parse(hex.substring(4,6),radix:16)}';
 
