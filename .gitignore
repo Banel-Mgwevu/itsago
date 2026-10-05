@@ -38,7 +38,6 @@ ios/Flutter/App.framework
 ios/Flutter/Flutter.framework
 ios/Flutter/Generated.xcconfig
 ios/ServiceDefinitions.json
-ios/Runner.xcworkspace/
 ios/build/
 
 # Android related
