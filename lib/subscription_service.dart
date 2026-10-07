@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'analytics_service.dart';
+import 'cloud_function_service.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart'
     show InAppPurchaseAndroidPlatformAddition, GooglePlayProductDetails;
 import 'package:in_app_purchase_android/billing_client_wrappers.dart'
@@ -402,8 +403,9 @@ class SubscriptionService {
           onPremiumStatusChanged?.call(firestoreIsPremium);
         }
       } else if (localIsPremium) {
-        // If we have local premium data but nothing in Firestore, upload to Firestore
-        await _uploadLocalSubscriptionToFirestore();
+        // Premium on the phone but nothing verified by the server: don't
+        // trust it. A real purchase is re-verified by restorePurchases.
+        await prefs.setBool('is_premium', false);
       }
       
     } catch (e) {
@@ -655,17 +657,17 @@ class SubscriptionService {
     }
     
     try {
-      // Basic validation - check if it's one of our products
       if (!_kEntitlementProductIds.contains(purchaseDetails.productID)) {
         return false;
       }
-
-      // For Android, you would typically send purchaseDetails.verificationData to your server
-      // For iOS, you would send purchaseDetails.verificationData.serverVerificationData
-      
-      // For now, we'll do basic local validation
-      return purchaseDetails.verificationData.localVerificationData.isNotEmpty;
-      
+      // The server checks with Google Play / the App Store and is the only
+      // thing that can mark this account Premium.
+      final res = await CloudFunctionService.verifySubscription(
+        platform: Platform.isIOS ? 'ios' : 'android',
+        purchaseToken: Platform.isIOS ? null : purchaseDetails.verificationData.serverVerificationData,
+        transactionId: Platform.isIOS ? purchaseDetails.purchaseID : null,
+      );
+      return res['active'] == true;
     } catch (e) {
       if (kDebugMode) {
         print('SubscriptionService: Purchase verification error: $e');
@@ -693,8 +695,8 @@ class SubscriptionService {
       await prefs.setString('purchase_id', purchaseDetails.purchaseID ?? '');
       await prefs.setInt('purchase_date', DateTime.now().millisecondsSinceEpoch);
 
-      // Save to Firestore if user is authenticated
-      await _saveSubscriptionToFirestore(subscriptionData);
+      // Firestore is written by the server (verifySubscription), not here.
+      if (kDebugMode) print('SubscriptionService: verified $subscriptionData');
       
       if (kDebugMode) {
         print('SubscriptionService: Premium activated for product ${purchaseDetails.productID}');
@@ -741,11 +743,30 @@ class SubscriptionService {
     }
   }
 
+  /// Re-checks the subscription with the store via the server, catching
+  /// renewals, cancellations and refunds. Fails open on network errors.
   Future<void> _refreshEntitlement() async {
-    if (Platform.isIOS) {
-      await _refreshIosEntitlement();
-      return;
+    if (_auth.currentUser == null) return;
+    try {
+      final current = await _getSubscriptionFromFirestore();
+      if (current == null) return;
+      final res = await CloudFunctionService.verifySubscription(
+          platform: current['platform'] == 'ios' ? 'ios' : 'android');
+      final active = res['active'] == true;
+      final prefs = await SharedPreferences.getInstance();
+      final was = prefs.getBool('is_premium') ?? false;
+      await prefs.setBool('is_premium', active);
+      Analytics.setPremium(active);
+      if (was != active) onPremiumStatusChanged?.call(active);
+    } catch (e) {
+      if (kDebugMode) print('SubscriptionService: server refresh failed (kept as is): $e');
     }
+  }
+
+  // Old on-device check, kept for reference. The server check above
+  // replaces it on both platforms.
+  // ignore: unused_element
+  Future<void> _refreshEntitlementOnDevice() async {
     if (!Platform.isAndroid || !_isAvailable) return;
 
     try {
@@ -789,30 +810,9 @@ class SubscriptionService {
   }
 
   Future<void> _deactivatePremium() async {
+    // Only the local flag - the server owns the Firestore record.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_premium', false);
-
-    final user = _auth.currentUser;
-    if (user == null) return;
-    try {
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('subscriptions')
-          .doc('current')
-          .set({
-        'userId': user.uid,
-        'isPremium': false,
-        'isActive': false,
-        'platform': Platform.isIOS ? 'ios' : 'android',
-        'expiredAt': FieldValue.serverTimestamp(),
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (e) {
-      if (kDebugMode) {
-        print('SubscriptionService: Error deactivating premium in Firestore: $e');
-      }
-    }
   }
 
   // Method to handle user authentication changes
@@ -884,8 +884,12 @@ class PremiumStatus {
             .doc('current')
             .get();
 
-        if (doc.exists && doc.data() != null) {
+        if (!doc.exists || doc.data() == null) {
+          return false; // signed in, nothing verified by the server
+        }
+        {
           final data = doc.data()!;
+          if (data['verifiedBy'] != 'server') return false;
           final isPremium = data['isPremium'] ?? false;
           final isActive = data['isActive'] ?? false;
           

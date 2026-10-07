@@ -18,11 +18,28 @@ class CloudFunctionService {
   // payload shape and returns Claude-shaped responses ({content:[{text}]}),
   // and any Claude model name in `model` is mapped server-side to
   // gemini-2.5-flash.
+  /// Asks the server to confirm a subscription with Google Play or the
+  /// App Store. Pass the token/transaction ID after a purchase, or nothing
+  /// to re-check the one already on file. Returns {active, expiry, ...}.
+  static Future<Map<String, dynamic>> verifySubscription({
+    required String platform,
+    String? purchaseToken,
+    String? transactionId,
+  }) async {
+    final name = platform == 'ios' ? 'verifyAppStoreSubscription' : 'verifyPlaySubscription';
+    final result = await _functions.httpsCallable(name).call({
+      if (purchaseToken != null) 'purchaseToken': purchaseToken,
+      if (transactionId != null) 'transactionId': transactionId,
+    });
+    return Map<String, dynamic>.from(result.data as Map);
+  }
+
   static Future<Map<String, dynamic>> callClaude({
     required String model,
     required int maxTokens,
     required List<Map<String, dynamic>> messages,
     String? system,
+    String? feature, // e.g. 'coach' - used by the server's daily limits
   }) async {
     final payload = {
       'model': model,
@@ -33,7 +50,7 @@ class CloudFunctionService {
 
     final result = await _functions
         .httpsCallable('callGemini')
-        .call({'payload': payload});
+        .call({'payload': payload, if (feature != null) 'feature': feature});
 
     return Map<String, dynamic>.from(result.data);
   }

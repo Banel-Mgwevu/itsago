@@ -4,19 +4,13 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null 
         && request.auth.uid == userId;
+      // Premium is written ONLY by the server after checking with
+      // Google Play / the App Store (verifyPlaySubscription /
+      // verifyAppStoreSubscription). Users can read their own, never write.
       match /subscriptions/{subscriptionId} {
-        allow read, write: if request.auth != null 
+        allow read: if request.auth != null
           && request.auth.uid == userId;
-        allow create: if request.auth != null
-          && request.auth.uid == userId
-          && request.resource.data.userId == userId
-          && request.resource.data.keys().hasAll([
-               'userId', 'isPremium', 'platform'])
-          && request.resource.data.isPremium is bool;
-        allow update: if request.auth != null
-          && request.auth.uid == userId
-          && resource.data.userId == userId
-          && request.resource.data.userId == userId;
+        allow write: if false;
       }
       match /purchase_history/{purchaseId} {
         allow read: if request.auth != null 
@@ -54,6 +48,13 @@ service cloud.firestore {
     }
     // -- Promo codes: only the redeemPromoCode Cloud Function touches these --
     match /promo_codes/{document=**} {
+      allow read, write: if false;
+    }
+    // -- Server-only: daily usage limits and purchase ownership --
+    match /usage/{document=**} {
+      allow read, write: if false;
+    }
+    match /purchase_tokens/{document=**} {
       allow read, write: if false;
     }
     // -- Sponsor reports: built nightly by a Cloud Function, console only --

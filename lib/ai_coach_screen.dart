@@ -14,6 +14,7 @@ import 'purchase_service.dart';
 import 'access_service.dart';
 import 'paywall.dart';
 import 'analytics_service.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class AiCoachScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -302,6 +303,7 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           maxTokens: 220,
           system: _systemPrompt(),
           messages: history,
+          feature: 'coach',
         );
       
         final raw = CloudFunctionService.extractText(res);
@@ -316,6 +318,24 @@ class _AiCoachScreenState extends State<AiCoachScreen>
           if (!_unlimited) AccessService.recordAiCoachMessage();
           Analytics.coachMessage(_unlimited);
         }
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'resource-exhausted' && mounted) {
+        // The server says today's free messages are used up.
+        setState(() {
+          if (_messages.isNotEmpty && _messages.last.role == 'user') _messages.removeLast();
+          _thinking = false;
+        });
+        _saveChat();
+        if (_inputCtrl.text.isEmpty) _inputCtrl.text = text;
+        final unlocked = await Paywall.show(context, PaywallFeature.aiCoach);
+        if (unlocked) _unlimited = true;
+        return;
+      }
+      if (mounted) setState(() {
+        _messages.add(_Msg(role: 'assistant', isError: true,
+          text: 'Sorry - connection issue. Please try again.'));
+        _thinking = false;
+      });
     } catch (_) {
       if (mounted) setState(() {
         _messages.add(_Msg(role: 'assistant', isError: true,

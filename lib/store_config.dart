@@ -7,7 +7,7 @@ class StoreConfig {
   /// Numeric Apple ID of ITSAGO, shown in App Store Connect under
   /// App Information > Apple ID (e.g. '6741234567'). Fill in once the app
   /// record exists - until then the iOS "rate us" fallback is skipped.
-  static const String appStoreId = '';
+  static const String appStoreId = '6818790329';
 
   static bool get isIOS => Platform.isIOS;
 
