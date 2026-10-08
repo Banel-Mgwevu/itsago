@@ -1,6 +1,8 @@
 # Codemagic: builds ITSAGO for iOS on a cloud Mac and uploads it to TestFlight.
-# One-time setup in Codemagic (Team settings > Integrations > Developer Portal):
-#   add an App Store Connect API key and name it exactly: ITSAGO ASC Key
+# Uses the SAVED signing files in Codemagic (Team settings > Code signing
+# identities): certificate "itsago_distribution" + profile "itsago_app_store".
+# Codemagic never creates new certificates (Apple allows only 2).
+# Integration (Team settings > Integrations > Developer Portal): "ITSAGO ASC Key"
 workflows:
   ios-release:
     name: iOS release (TestFlight)
@@ -20,12 +22,12 @@ workflows:
         script: flutter pub get
       - name: Install pods
         script: find . -name "Podfile" -execdir pod install \;
-      - name: Set up code signing
+      - name: Use saved signing files
         script: xcode-project use-profiles
       - name: Build IPA
         script: |
           flutter build ipa --release \
-            --build-number=$BUILD_NUMBER \
+            --build-number=$((BUILD_NUMBER + 100)) \
             --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
@@ -33,4 +35,5 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
+        # Upload to TestFlight for internal testers only (no external beta review)
+        submit_to_testflight: false
