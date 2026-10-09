@@ -47,6 +47,10 @@
 	<true/>
 
 	<!-- Required - app crashes on first permission request without these -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ITSAGO opens your photos only when you choose a CV or document to upload. Nothing is accessed without your choice.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ITSAGO does not use your location. If asked, you can safely tap Don't Allow.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>ITSAGO uses your camera during practice interviews to check your framing and give you eye contact feedback.</string>
 	<key>NSMicrophoneUsageDescription</key>
