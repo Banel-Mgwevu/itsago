@@ -287,9 +287,36 @@ class SubscriptionService {
       print('SubscriptionService: Starting purchase for '
           '${productDetails.id} (${_basePlanOf(productDetails) ?? 'default'})');
     }
+    await _finishStaleIosTransactions();
     return _inAppPurchase.buyNonConsumable(
       purchaseParam: PurchaseParam(productDetails: productDetails),
     );
+  }
+
+  /// iOS: StoreKit refuses a new purchase ("storekit_duplicate_product_object")
+  /// while an old transaction for the same product is still unfinished in the
+  /// payment queue - e.g. a failed or cancelled attempt that was never closed.
+  /// Finish those leftovers first. Successful purchases ("purchased") are left
+  /// alone so the normal purchase flow can verify and finish them.
+  Future<void> _finishStaleIosTransactions() async {
+    if (!Platform.isIOS) return;
+    try {
+      final queue = SKPaymentQueueWrapper();
+      final transactions = await queue.transactions();
+      for (final t in transactions) {
+        final s = t.transactionState;
+        if (s == SKPaymentTransactionStateWrapper.failed ||
+            s == SKPaymentTransactionStateWrapper.restored) {
+          await queue.finishTransaction(t);
+          if (kDebugMode) {
+            print('SubscriptionService: finished stale iOS transaction '
+                '${t.payment.productIdentifier} ($s)');
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) print('SubscriptionService: could not clear iOS queue: $e');
+    }
   }
 
   Future<void> restorePurchases() async {
@@ -318,7 +345,10 @@ class SubscriptionService {
     // dismissed prompt surfaces as a "cancelled" purchase. Renewals still
     // arrive on their own, and the server check (_refreshEntitlement)
     // keeps premium up to date.
-    if (Platform.isIOS) return;
+    if (Platform.isIOS) {
+      await _finishStaleIosTransactions();
+      return;
+    }
     try {
       // This will trigger the purchase stream with existing purchases
       await _inAppPurchase.restorePurchases();
