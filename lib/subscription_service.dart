@@ -312,6 +312,13 @@ class SubscriptionService {
   }
 
   Future<void> _checkExistingPurchases() async {
+    // iOS: never restore automatically. On iPhone, restorePurchases() can
+    // pop up an Apple ID sign-in at app launch (Apple wants restore to be
+    // user-initiated - the paywall's "Restore purchase" button), and a
+    // dismissed prompt surfaces as a "cancelled" purchase. Renewals still
+    // arrive on their own, and the server check (_refreshEntitlement)
+    // keeps premium up to date.
+    if (Platform.isIOS) return;
     try {
       // This will trigger the purchase stream with existing purchases
       await _inAppPurchase.restorePurchases();
