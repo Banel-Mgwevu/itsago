@@ -8,6 +8,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'cv_storage_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'firebase_options.dart';
 import 'remote_config_service.dart';
@@ -34,6 +35,17 @@ void main() async {
     // Enforce POPIA 30-day retention on startup
   CVStorageService.purgeExpired().catchError((_) {});
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+    // iOS keeps the Firebase login in the Keychain even after the app is
+    // deleted. On the first launch after a fresh install, sign out so the
+    // user starts clean (app preferences ARE wiped on uninstall).
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!(prefs.getBool('installed_before') ?? false)) {
+        await FirebaseAuth.instance.signOut();
+        await prefs.setBool('installed_before', true);
+      }
+    } catch (_) {}
 
     // Crash reporting: every uncaught Flutter and Dart error goes to
     // Firebase Console > Crashlytics. Off in debug so testing stays quiet.

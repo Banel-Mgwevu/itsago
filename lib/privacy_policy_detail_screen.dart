@@ -78,8 +78,8 @@ class PrivacyPolicyDetailScreen extends StatelessWidget {
                 _point(Icons.gpp_good_rounded, AppColors.ink,
                   'Your POPIA rights',
                   'Access, correct or delete your data anytime from '
-                  'Settings, or email support@itsago.co.za - we reply '
-                  'within 72 hours.'),
+                  'Settings (Manage my data), or email support@itsago.app - '
+                  'we reply within 72 hours.'),
                 _point(Icons.badge_rounded, AppColors.red,
                   'Your profile',
                   'When you sign up, we ask a few optional questions - '
@@ -128,21 +128,78 @@ class PrivacyPolicyDetailScreen extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _point(Icons.login_rounded, AppColors.blue,
                   'Signing in',
-                  'When you sign in with Google or Microsoft, we receive '
-                  'your name, email address and profile photo from that '
-                  'provider, to create and identify your account.'),
+                  'When you sign in with Google, Microsoft or Apple, we '
+                  'receive your name and email address (and profile photo, '
+                  'if the provider shares it) to create and identify your '
+                  'account. With Apple you can choose to hide your email.'),
                 _point(Icons.description_rounded, AppColors.red,
                   'CV Builder',
-                  'CVs you upload or build (including your name, contact '
-                  'details and work history) are stored securely to '
-                  'generate your optimised CV, and are only used for that '
-                  'purpose - never shared or used to train AI models.'),
+                  'CVs you upload to Revamp are processed by AI and stored '
+                  'securely so you can download them again. CVs you build '
+                  'yourself stay on your phone. Either way, your CV is only '
+                  'used to create your CV - never shared or used to train '
+                  'AI models.'),
                 _point(Icons.chat_bubble_rounded, AppColors.amber,
                   'AI Coach chat',
                   'Messages you send the AI Coach are sent to Google\'s '
-                  'Gemini AI to generate a reply. Chat history is kept so '
-                  'you can pick up the conversation later, and can be '
-                  'deleted anytime from Settings.'),
+                  'Gemini AI to generate a reply. Your chat history is saved '
+                  'on your phone so you can pick up later - tap New chat to '
+                  'clear it.'),
+              ])),
+
+            const SizedBox(height: 28),
+
+            AppWidgets.sectionLabel('BEHIND THE SCENES', accent: AppColors.amber),
+            const SizedBox(height: 10),
+            Text('Payments, analytics\n& how AI handles data',
+              style: AppText.headline),
+            const SizedBox(height: 6),
+            Text('The services that keep ITSAGO running, and what they see.',
+              style: AppText.caption.copyWith(height: 1.5)),
+
+            const SizedBox(height: 22),
+
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                border: Border.all(color: AppColors.ink, width: 2),
+                boxShadow: const [AppShadows.hard4]),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _point(Icons.memory_rounded, AppColors.amber,
+                  'How Google\'s AI handles your data',
+                  'Text sent to Google\'s Gemini AI may be temporarily '
+                  'cached by Google for up to 24 hours to make responses '
+                  'faster. It is encrypted, kept separate from other '
+                  'customers, and never used to train Google\'s AI models.'),
+                _point(Icons.insights_rounded, AppColors.blue,
+                  'App analytics',
+                  'We use Firebase Analytics to understand how the app is '
+                  'used - for example, when a CV is built or an interview '
+                  'is completed. We never send your answers, CV content, '
+                  'name or email to analytics.'),
+                _point(Icons.bug_report_rounded, AppColors.red,
+                  'Crash reports',
+                  'If the app crashes, Firebase Crashlytics sends us a '
+                  'technical report (such as phone model, OS version and '
+                  'where the error happened) so we can fix it.'),
+                _point(Icons.payments_rounded, AppColors.ink,
+                  'Payments',
+                  'Subscriptions are paid through Google Play or the App '
+                  'Store. We never see your card details - we only receive '
+                  'confirmation of your subscription and when it renews.'),
+                _point(Icons.groups_rounded, AppColors.blue,
+                  'Sponsored access',
+                  'If a university, employer or sponsor gives you free '
+                  'access with a code, we share only totals with them '
+                  '(for example, how many people used it) - never your '
+                  'name, answers or CV.'),
+                _point(Icons.public_rounded, AppColors.amber,
+                  'Where your data is stored',
+                  'We use Google Cloud and Firebase, which may store and '
+                  'process data on servers outside South Africa, with '
+                  'safeguards in place as POPIA requires.'),
               ])),
           ]))),
       ])));

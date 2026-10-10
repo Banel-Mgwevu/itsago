@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:interviewai/splash_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'purchase_service.dart';
@@ -48,47 +50,54 @@ class _PrivacyRightsScreenState extends State<PrivacyRightsScreen> {
     if (confirm != true) return;
     setState(() => _loading = true);
     try {
-      // Re-auth check - Firebase requires recent login for delete
       final authUser = FirebaseAuth.instance.currentUser;
       if (authUser == null) { setState(() => _loading = false); _toast('Not signed in.'); return; }
-      final uid = authUser.uid;
-      try {
-        final googleSignIn = GoogleSignIn();
-        final googleUser = await googleSignIn.signIn();
-        if (googleUser == null) {
+
+      // Sign in with Apple: Apple requires us to revoke the app's access
+      // when an account is deleted. That needs a fresh Apple sign-in.
+      final usesApple = authUser.providerData.any((p) => p.providerId == 'apple.com');
+      if (usesApple) {
+        try {
+          final cred = await authUser.reauthenticateWithProvider(AppleAuthProvider());
+          final code = cred.additionalUserInfo?.authorizationCode;
+          if (code != null) {
+            await FirebaseAuth.instance.revokeTokenWithAuthorizationCode(code);
+          }
+        } catch (e) {
           setState(() => _loading = false);
-          _toast('Re-authentication required to delete your account.');
+          _toast('Please confirm with Apple to delete your account.');
           return;
         }
-        final googleAuth = await googleUser.authentication;
-        final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
-        );
-        await authUser.reauthenticateWithCredential(credential);
-      } catch (e) {
-        setState(() => _loading = false);
-        _toast('Please sign out and sign back in, then try deleting again.');
-        return;
       }
-      await authUser.delete();
-      await CVStorageService.deleteAllCVs();
-      final db = FirebaseFirestore.instance;
-      final userDoc = db.collection('users').doc(uid);
-      for (final sub in ['cvs','sessions','subscriptions','purchase_history']) {
-        final snap = await userDoc.collection(sub).get();
-        for (final doc in snap.docs) { await doc.reference.delete(); }
-      }
-      await userDoc.delete();
+
+      // 1. CV files in storage (while we're still signed in)
+      try { await CVStorageService.deleteAllCVs(); } catch (_) {}
+
+      // 2. Everything else + the login itself, on the server - works for
+      //    Google, Microsoft and Apple, and nothing gets left behind.
+      await FirebaseFunctions.instance
+          .httpsCallable('deleteMyAccount',
+              options: HttpsCallableOptions(timeout: const Duration(seconds: 120)))
+          .call();
+
+      // 3. Clear everything on this phone
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      await FirebaseAuth.instance.signOut();
+      try { await GoogleSignIn().signOut(); } catch (_) {}
+      try { await FirebaseAuth.instance.signOut(); } catch (_) {}
       if (mounted) Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const SplashScreen()),
         (r) => false);
-    } catch (e) {
-      setState(() => _loading = false);
-      _toast('Please sign out and sign back in, then try deleting again. Firebase requires recent login.');
+    } on FirebaseFunctionsException catch (e) {
+      // Show the real reason so problems can be fixed (e.g. not-found,
+      // unauthenticated, internal) and record it in Crashlytics.
+      FirebaseCrashlytics.instance.recordError(e, null, reason: 'deleteMyAccount failed');
+      if (mounted) setState(() => _loading = false);
+      _toast('Could not delete your account (${e.code}). ${e.message ?? ''}');
+    } catch (e, st) {
+      FirebaseCrashlytics.instance.recordError(e, st, reason: 'deleteAccount failed');
+      if (mounted) setState(() => _loading = false);
+      _toast('Could not delete your account: $e');
     }
   }
   Future<void> _revokeConsent() async {
