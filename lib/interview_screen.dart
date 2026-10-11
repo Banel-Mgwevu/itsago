@@ -132,6 +132,25 @@ class _InterviewScreenState extends State<InterviewScreen> {
     _mgr.pauseInterviewTimer(false);
     return false;
   }
+
+  // On-screen exit (iPhone has no system back button, and WillPopScope also
+  // turns off the iOS swipe-back gesture). Same flow as Android back.
+  Future<void> _exitTapped() async {
+    if (_isExiting) return;
+    final leave = await _onWillPop();
+    if (leave && mounted) Navigator.of(context).maybePop();
+  }
+
+  Widget _exitButton() => Semantics(
+    button: true, label: 'Exit interview',
+    child: GestureDetector(
+      onTap: _exitTapped,
+      child: Container(width: 36, height: 36,
+        decoration: const BoxDecoration(
+          color: AppColors.white, border: AppBorders.ink2),
+        child: const Icon(Icons.close_rounded,
+          color: AppColors.ink, size: 20))));
+
   @override
   Widget build(BuildContext context) => WillPopScope(
     onWillPop: _onWillPop,
@@ -167,6 +186,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
           AppWidgets.badge(
             '${((_qIdx + 1) / widget.questions.length * 100).round()}%',
             bg: AppColors.red, fg: Colors.white),
+          const SizedBox(width: 10),
+          _exitButton(),
         ])),
 
       // Progress bar
@@ -360,6 +381,8 @@ class _InterviewScreenState extends State<InterviewScreen> {
                         style: AppText.label.copyWith(
                           color: Colors.white, fontSize: 10)),
                     ])),
+                const SizedBox(width: 8),
+                _exitButton(),
               ]),
               const SizedBox(height: 10),
               Container(width: double.infinity,
