@@ -48,8 +48,9 @@ class CvBuilderChoiceScreen extends StatelessWidget {
                 answer: 'NOT YET',
                 action: 'Build one',
                 dream: 'Every dream job starts with one page.',
-                detail: 'Fill in your details step by step and get a clean PDF.',
-                tag: 'FREE',
+                detail: 'Fill in your details step by step, pick a design, '
+                    'then download it with Premium.',
+                tag: 'PREMIUM',
                 onTap: () => _open(context, CvBuildFlowScreen(cameras: cameras)),
               ),
             ]),

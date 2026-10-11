@@ -1659,7 +1659,9 @@ Max 5 gaps. Return ONLY the JSON.''';
     if (_openingDesign) return;
     setState(() => _selectedDesign = i);
     _openingDesign = true;
-    final allowed = _freeBuild ||
+    // Both paths are Premium now: people build their CV for free, then the
+    // paywall opens when they choose a design to use.
+    final allowed =
         await Paywall.ensureAccess(context, PaywallFeature.cvDownload);
     _openingDesign = false;
     if (!allowed || !mounted) return;
@@ -1669,7 +1671,6 @@ Max 5 gaps. Return ONLY the JSON.''';
   }
 
   Future<bool> _canExport() async {
-    if (_freeBuild) return true; // free "Build your CV" path
     if (!mounted) return false;
     return Paywall.ensureAccess(context, PaywallFeature.cvDownload);
   }
@@ -1729,7 +1730,7 @@ Max 5 gaps. Return ONLY the JSON.''';
         subject: '${_s('name')} - Job-Ready ATS CV',
         text: _freeBuild
             ? 'I built my CV with ITSAGO AI. '
-              'Build yours free: ${StoreConfig.shareLink}'
+              'Build yours: ${StoreConfig.shareLink}'
             : 'My CV went from $before% to $after% with ITSAGO AI! '
               'Download the free app to build your job-ready ATS CV: '
               '${StoreConfig.shareLink}',
